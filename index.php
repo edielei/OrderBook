@@ -3613,10 +3613,12 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     let detailSortKey = '';
     let detailSortDir = 'desc';
 
-    /* 把搜索用的小写索引预先算一次，输入时不再逐行拼字符串 */
+    /* 把搜索用的小写索引预先算一次，输入时不再逐行拼字符串；
+       列表只展示名称 / 联系人 / 联系电话，所以备注不参与匹配——否则搜只命中备注的词，
+       会冒出一家看起来毫不相干的批发商 */
     function setShopData(list) {
         shopData = (list || []).map((w) => {
-            const blob = [w.name, w.contact, w.phone, w.note].join(' ').toLowerCase();
+            const blob = [w.name, w.contact, w.phone].join(' ').toLowerCase();
             return Object.assign({}, w, { _blob: blob });
         });
     }
