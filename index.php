@@ -1159,6 +1159,9 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
 /* ---------- 列表 & 搜索 ---------- */
 .table-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:16px;flex-wrap:wrap;}
 .table-head h2{margin:0;}
+/* 详情页标题：批发商名字放大加粗当主角，功能说明降成灰色小字，别糊成一整句 */
+.table-head h2 .sd-name{font-size:18px;font-weight:700;color:var(--primary-strong);letter-spacing:.2px;}
+.table-head h2 .sd-sub{font-size:12.5px;font-weight:500;color:var(--muted-light);letter-spacing:0;}
 .search{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
 
 .search-input-wrap { position: relative; display: flex; align-items: center; }
@@ -1218,32 +1221,14 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
 .data-table tbody tr:last-child td{border-bottom:none;}
 .data-table tbody tr:hover{background:#f7f9fc;}
 .data-table .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
-/* 联系人保持单行；电话可能填了好几个号码，允许在空格处折行 */
-#shopListCard .data-table td:nth-child(3){white-space:nowrap;}
-#shopListCard .data-table td.ph-cell{font-size:13.5px;}
-#shopListCard .data-table td.ph-cell .ph-line{display:block;white-space:nowrap;}
 .data-table .wh-name{font-weight:600;color:var(--primary-strong);white-space:nowrap;min-width:120px;}
-/* 批发商列表：备注列不再占表头，7 列时给名称列留够宽度，窄窗口走横向滚动而不是把名字压成竖排 */
-#shopListCard .data-table{min-width:720px;}
-/* 批发商列表：备注单独占一行，跨满所有列，文字与「批发商」列左边界对齐；
-   上面那行底边框去掉，整组共用一条分隔线，比两行各留 padding 矮一截 */
-/* 有备注的行：主行底部不留空白，备注行顶部不留空白，两行贴着，看着就是一行两排 */
-#shopListCard .data-table tr.has-note td{border-bottom:0;padding-bottom:3px;}
-/* 鼠标停在主行或备注行的任意一半，两半一起高亮，不出现一半亮一半灰 */
-#shopListCard .data-table tr.has-note.ro-hover td,
-#shopListCard .data-table tr.has-note:hover td,
-#shopListCard .data-table tr.has-note:hover + .shop-note-row td,
-#shopListCard .data-table tr.shop-note-row.ro-hover td,
-#shopListCard .data-table tr.shop-note-row:hover td{background:#f4f8ff;}
-/* 备注行拆成两格：第一格空着占「#」列，第二格跨后面 6 列。
-   这样无论表格被拉多宽，备注文字都跟「批发商」列的文字严格左对齐 */
-#shopListCard .shop-note-row td{
-    border-bottom:1px solid #f1f5fb;
-    padding:0 14px 10px;
-    font-size:12px;line-height:1.5;color:#8a97ab;
-    white-space:normal;word-break:break-word;
-}
-#shopListCard .shop-note-row td.note-pad{padding:0;}
+/* 批发商列表只放三样东西：名称 / 联系人 / 联系电话（+ 操作），4 列 */
+#shopListCard .data-table{min-width:440px;}
+#shopListCard .data-table .ct-cell{white-space:nowrap;}
+#shopListCard .data-table .ph-cell .ph-line{display:block;white-space:nowrap;}
+/* 联系人 / 联系电话按内容宽度站住，剩下的宽度全给名称列 */
+#shopListCard .data-table th:nth-child(3),
+#shopListCard .data-table th:nth-child(4){width:1px;}
 #shopListCard .data-table tbody tr:last-child td{border-bottom:none;}
 .data-table .muted{color:var(--muted-light);}
 .data-table .idx-cell{color:var(--muted-light);font-size:12.5px;text-align:center;font-variant-numeric:tabular-nums;}
@@ -1326,7 +1311,8 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
     background: #eef3ff; border-color: #c3d4ff; color: var(--primary-strong);
 }
 
-.batch-shop{font-weight:600;color:#3b63e0;font-size:14px;}
+/* 批发商名可点（点了就按这家筛选），鼠标做成链接那种手型 */
+.batch-shop{font-weight:600;color:#3b63e0;font-size:14px;cursor:pointer;}
 .batch-shop em{font-style:normal;color:var(--muted-light);font-weight:400;}
 .batch-right{display:flex;align-items:center;gap:10px;}
 .batch-body{overflow-x:auto;}
@@ -1514,25 +1500,29 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     .page-info{margin-left:0;text-align:center;}
 }
 
-/* ---------- 批发商列表：窄屏（手机 / 平板 / 窄窗口）隐藏「联系人 / 电话 / 备注」三列 ----------
-   这三列在手机上没地方放（表格 min-width:760px），直接隐藏，只留 # / 批发商 / 进货单数 / 累计金额 / 操作；
-   同时放开列宽、收紧内边距和字号，整张表不用左右拖也能一屏看完。PC 端不受影响。 */
+/* ---------- 批发商列表：窄屏（手机 / 平板 / 窄窗口）收紧列宽与字号 ----------
+   列表只有 4 列（名称 / 联系人 / 联系电话 / 操作），窄屏压字号和内边距即可，
+   名称与联系人允许折行、电话号码保持一行一个，表格不用左右拖也能一屏看完。 */
 @media (max-width:820px){
     #shopListCard .data-table{min-width:0;width:100%;table-layout:auto;}
     #shopListCard .data-table th,
-    #shopListCard .data-table td{width:auto !important;padding:9px 5px;font-size:12.5px;}
+    #shopListCard .data-table td{width:auto !important;padding:9px 6px;font-size:12.5px;}
     #shopListCard .data-table thead th{white-space:nowrap;font-size:11.5px;font-weight:600;}
-    #shopListCard .data-table td:nth-child(6){font-size:12px;}
-    /* 隐藏第 3、4 列：联系人 / 电话（备注已单独成行，不在表里） */
-    #shopListCard .data-table th:nth-child(3),
-    #shopListCard .data-table th:nth-child(4),
-    #shopListCard .data-table td:nth-child(3),
-    #shopListCard .data-table td:nth-child(4){display:none;}
-    /* 备注行：窄屏下缩进收小，跨满整行 */
-    #shopListCard .shop-note-row td{padding:0 5px 7px;font-size:11.5px;}
-    #shopListCard .data-table td:nth-child(2){white-space:normal;word-break:break-word;}
-    #shopListCard .data-table .ops .btn-mini{padding:4px 6px;margin:0 2px;font-size:11px;}
+    #shopListCard .data-table td:nth-child(2),
+    #shopListCard .data-table td:nth-child(3){white-space:normal;word-break:break-word;}
     #shopListCard .data-table .idx-cell{padding-left:8px;}
+    #shopListCard .data-table .ph-cell .ph-line{font-size:12px;}
+    #shopListCard .data-table .ops .btn-mini{padding:4px 6px;margin:0 2px;font-size:11px;}
+}
+
+/* 手机竖屏：列再多也得塞进去 —— 名称 / 联系人 / 电话都允许断行，操作按钮再缩一号 */
+@media (max-width:560px){
+    #shopListCard .data-table th,
+    #shopListCard .data-table td{padding:8px 4px;}
+    #shopListCard .data-table .wh-name{min-width:0;white-space:normal;word-break:break-all;}
+    #shopListCard .data-table .ct-cell{white-space:normal;word-break:break-all;}
+    #shopListCard .data-table .ph-cell .ph-line{white-space:normal;word-break:break-all;font-size:12px;}
+    #shopListCard .data-table .ops .btn-mini{padding:3px 5px;margin:0 1px;font-size:11px;}
 }
 
 /* ---------- 批发商详情：窄窗口收紧内边距与字号 ----------
@@ -1650,7 +1640,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                         <span class="date-icon" id="dateFilterTrigger" title="点击选择日期">
                             <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
                         </span>
-                        <input type="date" id="dateFilterNative" value="<?= h($date) ?>" style="position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none;">
+                        <input type="date" id="dateFilterNative" value="<?= h($date) ?>" tabindex="-1" style="position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none;">
                     </div>
 
                     <button type="button" class="btn btn-ghost btn-sm" id="clearFilterBtn">清除筛选</button>
@@ -1714,20 +1704,18 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 
             <div class="list-tip">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-                点击任意一行，可查看该批发商的供货商品与最新报价
+                点整行看供货商品与最新报价；联系人 / 联系电话 直接列在表里
             </div>
 
             <div class="items-wrap">
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th class="sortable" style="width:44px;text-align:center" data-sort="index" data-label="#" title="点击恢复默认顺序">#</th>
+                            <th style="width:44px;text-align:center">#</th>
                             <th>批发商</th>
-                            <th style="width:86px">联系人</th>
-                            <th style="width:146px">电话</th>
-                            <th class="sortable" style="width:90px;text-align:right" data-sort="orders" data-label="进货单数" title="点击排序">进货单数</th>
-                            <th class="sortable" style="width:116px;text-align:right" data-sort="amount" data-label="累计金额" title="点击排序">累计金额</th>
-                            <th style="width:100px;text-align:center">操作</th>
+                            <th data-label="联系人">联系人</th>
+                            <th data-label="联系电话">联系电话</th>
+                            <th style="width:104px;text-align:center">操作</th>
                         </tr>
                     </thead>
                     <tbody id="shopBox"></tbody>
@@ -1738,18 +1726,18 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         <!-- 批发商详情：供货商品 + 最新报价 -->
         <section class="card" id="shopDetailCard" style="display:none">
             <div class="table-head">
-                <h2 id="shopDetailTitle">供货商品与最新报价</h2>
+                <h2 id="shopDetailTitle"><span class="sd-name">批发商</span><span class="sd-sub">供货商品与最新报价</span></h2>
                 <button type="button" class="btn btn-ghost btn-sm" id="shopDetailBack">← 返回批发商列表</button>
             </div>
 
             <div class="detail-head" id="shopDetailMeta"></div>
 
             <div class="detail-bar">
+                <span class="detail-count" id="detailCount"></span>
                 <div class="search-input-wrap">
                     <input id="detailKeyword" placeholder="搜索该批发商的商品名称" autocomplete="off">
                     <button type="button" id="clearDetailKeyword" class="clear-btn" title="清空">×</button>
                 </div>
-                <span class="detail-count" id="detailCount"></span>
             </div>
 
             <div class="items-wrap">
@@ -1796,7 +1784,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                             <span class="date-icon" id="dateTrigger" title="点击选择日期">
                                 <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
                             </span>
-                            <input type="date" id="f-odate-native" value="<?= $today ?>" style="position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none;">
+                            <input type="date" id="f-odate-native" value="<?= $today ?>" tabindex="-1" style="position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none;">
                         </div>
                     </div>
                     <div class="field field-note-full">
@@ -1889,6 +1877,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     /* 空值占位、空数据行：表格渲染里这两处重复最多，统一成一行调用 */
     const DASH = '<span class="muted">—</span>';
     const orDash = (v) => v ? esc(v) : DASH;
+    /* 电话可能填了好几个号码，按分隔符拆开，列表里一个号码占一行 */
+    const splitPhone = (v) => String(v || '').split(/[,，、;；\/]+/).map((p) => p.trim()).filter(Boolean);
     const emptyRow = (cols, msg) => '<tr class="empty-row"><td colspan="' + cols + '">' + msg + '</td></tr>';
 
     /* ===== 日期校验：拒绝 2 月 31 日、13 月、0 日这类不存在的日期 ===== */
@@ -3616,39 +3606,21 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     const detailKeyword   = $('detailKeyword');
     const clearDetailKw   = $('clearDetailKeyword');
     const detailCount     = $('detailCount');
-    const panelShopThead  = document.querySelector('#panel-shop thead');
     const panelDetailThead = document.querySelector('#shopDetailCard thead');
 
     let shopData    = [];
-    let shopSortKey = '';
-    let shopSortDir = 'desc';
     let detailProducts = [];
     let detailSortKey = '';
     let detailSortDir = 'desc';
 
-    const shopAmountText = (w) => String(w.amount || '0');
-    const shopAmountNum  = (w) => w._amount !== undefined ? w._amount : (parseFloat(shopAmountText(w).replace(/,/g, '')) || 0);
-
-    /* 把搜索用的小写索引、金额数值预先算一次，输入时不再逐行拼字符串 */
+    /* 把搜索用的小写索引预先算一次，输入时不再逐行拼字符串 */
     function setShopData(list) {
         shopData = (list || []).map((w) => {
             const blob = [w.name, w.contact, w.phone, w.note].join(' ').toLowerCase();
-            return Object.assign({}, w, { _blob: blob, _amount: parseFloat(String(w.amount || '0').replace(/,/g, '')) || 0 });
+            return Object.assign({}, w, { _blob: blob });
         });
     }
 
-    function updateShopSortIndicators() {
-        $$('#panel-shop th[data-sort]').forEach((th) => {
-            const label = th.dataset.label || headerLabel(th);
-            if (th.dataset.sort === shopSortKey) {
-                th.classList.add('sorted');
-                th.textContent = label + (shopSortDir === 'asc' ? ' ↑' : ' ↓');
-            } else {
-                th.classList.remove('sorted');
-                th.textContent = label;
-            }
-        });
-    }
 
     function renderShopTable() {
         if (!shopBox) return;
@@ -3659,73 +3631,29 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             ? shopData.filter((w) => w._blob.indexOf(kw) >= 0)
             : shopData.slice();
 
-        if (shopSortKey) {
-            const dir = shopSortDir === 'asc' ? 1 : -1;
-            const key = shopSortKey;
-            rows.sort((a, b) => {
-                const va = key === 'orders' ? (a.orders || 0) : shopAmountNum(a);
-                const vb = key === 'orders' ? (b.orders || 0) : shopAmountNum(b);
-                if (va === vb) return (a.id || 0) - (b.id || 0);
-                return (va - vb) * dir;
-            });
-        }
 
         if (!rows.length) {
-            shopBox.innerHTML = emptyRow(7, kw ? '没有匹配的批发商' : '暂无批发商，先在上方新增一个吧');
+            shopBox.innerHTML = emptyRow(5, kw ? '没有匹配的批发商' : '暂无批发商，先在上方新增一个吧');
             return;
         }
 
         shopBox.innerHTML = rows.map((w, idx) => {
-            const note = (w.note || '').trim();
-            return '<tr class="row-click js-shop-open' + (note ? ' has-note' : '') + '" data-id="' + w.id + '" data-name="' + esc(w.name) + '" title="查看商品与最新报价">'
+            const phones = splitPhone(w.phone);
+            return '<tr class="row-click js-shop-open" data-id="' + w.id + '" data-name="' + esc(w.name) + '" title="查看商品与最新报价">'
             + '<td class="idx-cell">' + (idx + 1) + '</td>'
             + '<td class="wh-name">' + hl(w.name, kw) + '</td>'
-            + '<td>' + (w.contact ? hl(w.contact, kw) : DASH) + '</td>'
-            + '<td class="ph-cell">' + (w.phone
-                ? String(w.phone).split(/[,，、;；\/]+/).map((p) => p.trim()).filter(Boolean)
-                    .map((p) => '<span class="ph-line">' + hl(p, kw) + '</span>').join('')
+            + '<td class="ct-cell">' + (w.contact ? hl(w.contact, kw) : DASH) + '</td>'
+            + '<td class="ph-cell">' + (phones.length
+                ? phones.map((p) => '<span class="ph-line">' + hl(p, kw) + '</span>').join('')
                 : DASH) + '</td>'
-            + '<td class="num">' + w.orders + '</td>'
-            + '<td class="num">￥' + esc(w.amount) + '</td>'
             + '<td class="ops">'
             +   '<button type="button" class="btn-mini js-shop-edit" data-id="' + w.id + '">编辑</button>'
             +   '<button type="button" class="btn-mini danger js-shop-del" data-id="' + w.id + '">删除</button>'
             + '</td>'
-            + '</tr>'
-            /* 备注单独一行：跨所有列，文字与「批发商」列左边界对齐；没填备注就不占这一行 */
-            + (note
-                ? '<tr class="shop-note-row js-shop-open" data-id="' + w.id + '" data-name="' + esc(w.name) + '" title="查看商品与最新报价">'
-                    + '<td class="note-pad"></td>'
-                    + '<td colspan="6">备注：' + hl(note, kw) + '</td>'
-                    + '</tr>'
-                : '');
+            + '</tr>';
         }).join('');
     }
 
-    /* 表头点击排序：进货单数 / 累计金额，点 # 恢复默认顺序 */
-    on(panelShopThead, 'click', (e) => {
-        const th = e.target.closest('th[data-sort]');
-        if (!th) return;
-        const key = th.dataset.sort;
-
-        /* 点 # → 恢复默认顺序（按批发商录入先后） */
-        if (key === 'index') {
-            shopSortKey = '';
-            shopSortDir = 'desc';
-            updateShopSortIndicators();
-            renderShopTable();
-            return;
-        }
-
-        if (shopSortKey === key) {
-            shopSortDir = shopSortDir === 'asc' ? 'desc' : 'asc';
-        } else {
-            shopSortKey = key;
-            shopSortDir = 'desc';
-        }
-        updateShopSortIndicators();
-        renderShopTable();
-    });
 
     /* 同步：筛选下拉 + 录入页联想列表 */
     function renderShopOptions() {
@@ -3860,24 +3788,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         if (row) openShopDetail(row.dataset.id, row.dataset.name);
     });
 
-    /* 备注行和它的主行算一组：鼠标停在备注上，主行也一起高亮 */
-    on(shopBox, 'mouseover', (e) => {
-        const tr = e.target.closest('tr');
-        let target = null;
-        let group = null;
-        if (tr && tr.classList.contains('shop-note-row')) {
-            const prev = tr.previousElementSibling;
-            if (prev && prev.classList.contains('has-note')) { target = prev; group = tr; }
-        }
-        shopBox.querySelectorAll('tr.ro-hover').forEach((r) => {
-            if (r !== target && r !== group) r.classList.remove('ro-hover');
-        });
-        if (target) target.classList.add('ro-hover');
-        if (group) group.classList.add('ro-hover');
-    });
-    on(shopBox, 'mouseleave', () => {
-        shopBox.querySelectorAll('tr.ro-hover').forEach((r) => r.classList.remove('ro-hover'));
-    });
+
 
     /* ============================================================
        13. 批发商详情：供货商品 + 最新报价
@@ -3980,7 +3891,9 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         if (clearDetailKw) clearDetailKw.style.display = 'none';
         if (detailCount)   detailCount.innerHTML = '';
 
-        shopDetailTitle.textContent = (name || '批发商') + ' · 供货商品与最新报价';
+        /* 标题里批发商名是主角（放大加粗），「供货商品与最新报价」只是灰色小字说明 */
+        shopDetailTitle.innerHTML = '<span class="sd-name">' + esc(name || '批发商') + '</span>'
+            + '<span class="sd-sub">供货商品与最新报价</span>';
         shopDetailMeta.innerHTML = '<span class="dh-muted">加载中…</span>';
         shopDetailBox.innerHTML  = '';
         showShopDetail(true);
