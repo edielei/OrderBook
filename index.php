@@ -53,6 +53,10 @@ try {
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_batches_wh ON batches(wholesaler, odate)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_items_name ON items(name)");
 
+    /* 每次启动顺手把批发商名的首尾空白清一遍（有可疑数据才真的动表），
+       让「档案里的名字」和「进货单里存的名字」始终是同一个口径 */
+    normalizeWholesalerData($pdo);
+
     /* 老库补列：规格。CREATE TABLE IF NOT EXISTS 不会给已有表加字段，
        所以每次启动都探一次表结构，缺了才 ALTER，避免报 duplicate column */
     $hasSpec = false;
@@ -149,6 +153,47 @@ function getStats(PDO $pdo): array {
         'month_count'  => (int)$mon['c'],
         'month_amount' => number_format((float)$mon['s'], 2),
     ];
+}
+
+/* 批发商名的统一口径：只去首尾空白（含半角空格、全角空格 U+3000、不换行空格 U+00A0、制表 / 换行），
+   名字中间的字不动。档案表、进货单表、保存入库、统计 JOIN 全走这一套 ——
+   否则「档案里 trim 过、进货单里带空格」时 JOIN 对不上，那家的单数和金额就会漏算。 */
+function normalizeWholesalerName(string $s): string {
+    $s = (string)preg_replace('/^[\s\x{00A0}\x{3000}]+|[\s\x{00A0}\x{3000}]+$/u', '', (string)$s);
+    return $s;
+}
+
+/* 老数据清洗（幂等）：首尾带空白的批发商名就地规范化，让统计 JOIN 重新对齐。
+   绝大多数行都是干净的，逐行比一下就走；同名撞车的行跳过（不因为清洗把数据搞成重复）。 */
+function normalizeWholesalerData(PDO $pdo): void {
+    foreach ([['batches', 'wholesaler'], ['wholesalers', 'name']] as $t) {
+        [$table, $col] = $t;
+        try {
+            /* 先用一条 SQL 探一下有没有可疑行（首尾半角空格 / 内部含全角空格或 NBSP），
+               干净的话直接返回，不必把整表拉进 PHP 逐行比对 */
+            $probe = (int)$pdo->query("SELECT COUNT(*) AS c FROM {$table}
+                                       WHERE {$col} <> '' AND ({$col} <> TRIM({$col})
+                                          OR {$col} LIKE '%　%' OR {$col} LIKE '%' || char(160) || '%')")->fetch()['c'];
+            if ($probe === 0) continue;
+            $rows = $pdo->query("SELECT id, {$col} AS v FROM {$table} WHERE {$col} <> ''")->fetchAll();
+        } catch (Throwable $e) {
+            continue;
+        }
+        $upd = null;
+        foreach ($rows as $r) {
+            $raw = (string)$r['v'];
+            $val = normalizeWholesalerName($raw);
+            if ($val === $raw || $val === '') continue;
+            try {
+                if ($upd === null) {
+                    $upd = $pdo->prepare("UPDATE {$table} SET {$col} = :v WHERE id = :id");
+                }
+                $upd->execute([':v' => $val, ':id' => (int)$r['id']]);
+            } catch (Throwable $e) {
+                /* 撞上同名唯一索引就跳过这一行，保持原样，不影响其它行 */
+            }
+        }
+    }
 }
 
 /* 首次使用（批发商表为空）时，把历史进货单里出现过的批发商名导入进来；
@@ -758,8 +803,9 @@ if ($ajax !== '') {
         if ($data === null) jsonOut(['ok' => false, 'msg' => '数据格式错误'], 400);
 
         $id      = (int)($data['id'] ?? 0);
-        /* 名称截到 60 字，与进货单里存的批发商名保持同一上限，否则统计按名 JOIN 会对不上 */
-        $name    = mb_substr(trim((string)($data['name'] ?? '')), 0, 60);
+        /* 名称截到 60 字，与进货单里存的批发商名保持同一上限；首尾空白也走同一套规范化，
+           否则统计按名 JOIN 会对不上 */
+        $name    = normalizeWholesalerName(mb_substr(normalizeWholesalerName((string)($data['name'] ?? '')), 0, 60));
         $contact = mb_substr(trim((string)($data['contact'] ?? '')), 0, 40);
         $phone   = mb_substr(trim((string)($data['phone'] ?? '')), 0, 30);
         $note    = mb_substr(trim((string)($data['note'] ?? '')), 0, 200);
@@ -841,7 +887,7 @@ if ($ajax !== '') {
         if ($data === null) jsonOut(['ok' => false, 'msg' => '数据格式错误'], 400);
 
         $id         = (int)($data['id'] ?? 0);
-        $wholesaler = trim((string)($data['wholesaler'] ?? ''));
+        $wholesaler = normalizeWholesalerName((string)($data['wholesaler'] ?? ''));
         $odate      = trim((string)($data['odate'] ?? ''));
         $note       = trim((string)($data['note'] ?? ''));
         $items      = $data['items'] ?? [];
@@ -882,7 +928,8 @@ if ($ajax !== '') {
         }
         if (!$clean) jsonOut(['ok' => false, 'msg' => '请至少填写一个商品名称'], 400);
 
-        $wholesaler = mb_substr($wholesaler, 0, 60);
+        /* 截到 60 字后再收一次首尾空白，避免截断处正好落在空格上 */
+        $wholesaler = normalizeWholesalerName(mb_substr($wholesaler, 0, 60));
         $note       = mb_substr($note, 0, 200);
 
         try {
