@@ -30,6 +30,7 @@ try {
             id       INTEGER PRIMARY KEY AUTOINCREMENT,
             batch_id INTEGER NOT NULL,
             name     TEXT NOT NULL,
+            spec     TEXT NOT NULL DEFAULT '',
             unit     TEXT NOT NULL DEFAULT '',
             qty      REAL NOT NULL DEFAULT 0,
             price    REAL NOT NULL DEFAULT 0
@@ -51,6 +52,16 @@ try {
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_batches_date ON batches(odate, id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_batches_wh ON batches(wholesaler, odate)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_items_name ON items(name)");
+
+    /* 老库补列：规格。CREATE TABLE IF NOT EXISTS 不会给已有表加字段，
+       所以每次启动都探一次表结构，缺了才 ALTER，避免报 duplicate column */
+    $hasSpec = false;
+    foreach ($pdo->query("PRAGMA table_info(items)")->fetchAll() as $c) {
+        if (($c['name'] ?? '') === 'spec') { $hasSpec = true; break; }
+    }
+    if (!$hasSpec) {
+        $pdo->exec("ALTER TABLE items ADD COLUMN spec TEXT NOT NULL DEFAULT ''");
+    }
 } catch (Throwable $e) {
     exit('数据库初始化失败：' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8'));
 }
@@ -93,8 +104,7 @@ function jsonOut(array $data, int $code = 200): void {
 
 /* 把 2026/1/5、2026.1.5、2026-01-05 归一化成 2026-01-05；
    不存在的日期（2 月 31 日、13 月、0 日等）一律返回 null */
-function normalizeDate(string $s): ?string {
-    $s = trim(preg_replace('#[/.\s]#', '-', $s));
+function normalizeDate(string $s): ?string {    $s = trim(preg_replace('#[/.\s]#', '-', $s));
     if ($s === '' || !preg_match('/^(\d{4})-(\d{1,2})-(\d{1,2})$/', $s, $m)) return null;
 
     $y = (int)$m[1]; $mo = (int)$m[2]; $d = (int)$m[3];
@@ -102,6 +112,18 @@ function normalizeDate(string $s): ?string {
     if (!checkdate($mo, $d, $y)) return null;     /* 含闰年判断，2 月 29 日只在闰年成立 */
 
     return sprintf('%04d-%02d-%02d', $y, $mo, $d);
+}
+
+/* 读 JSON 请求体：解析失败或不是对象就返回 null，调用处统一 400，
+   省掉每个 POST 接口里那三行 decode + is_array 判断 */
+function bodyJson(): ?array {
+    $data = json_decode((string)file_get_contents('php://input'), true);
+    return is_array($data) ? $data : null;
+}
+
+/* 取查询参数：去首尾空白并截断到 $max 个字（超长关键词会拖慢 SQL 与正则） */
+function qParam(string $key, int $max = 60): string {
+    return mb_substr(trim((string)($_GET[$key] ?? '')), 0, $max);
 }
 
 function getStats(PDO $pdo): array {
@@ -347,7 +369,7 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         $html .=     '</div>';
         $html .=   '</div>';
 
-        $html .=   '<div class="batch-body"><table class="batch-items">';
+        $html .=   '<div class="batch-body"><table class="batch-items cols-fit">';
         $html .=     '<thead><tr>'
             . '<th style="width:34px;text-align:center" data-sort="index" title="点击恢复默认顺序">#</th>'
             . '<th data-sort="name">商品名称</th>'
@@ -361,7 +383,11 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
             $sub = (float)$it['qty'] * (float)$it['price'];
             $html .= '<tr data-origin-idx="' . $idx . '">'
                 . '<td class="idx-cell">' . ($idx + 1) . '</td>'
-                . '<td class="name-cell">' . highlight($it['name'], $q) . '</td>'
+                . '<td class="name-cell" data-v="' . h($it['name']) . '">' . highlight($it['name'], $q)
+                    . ((string)($it['spec'] ?? '') !== ''
+                        ? '<span class="sp">' . h($it['spec']) . '</span>'
+                        : '')
+                    . '</td>'
                 . '<td>' . ($it['unit'] !== '' ? highlight($it['unit'], $q) : '—') . '</td>'
                 . '<td class="num">' . fmtNum($it['qty']) . '</td>'
                 . '<td class="num">￥' . number_format((float)$it['price'], 2) . '</td>'
@@ -394,9 +420,9 @@ $ajax = $_GET['ajax'] ?? '';
 if ($ajax !== '') {
     if ($ajax === 'list') {
         /* 关键词截断到 60 字、每页上限 200 条：避免超长查询和 ?per=999999 把页面拖垮 */
-        $q    = mb_substr(trim($_GET['q'] ?? ''), 0, 60);
+        $q    = qParam('q', 60);
         $date = normalizeDate(trim($_GET['d'] ?? '')) ?? '';   /* 非法日期一律视为未筛选 */
-        $shop = mb_substr(trim($_GET['w'] ?? ''), 0, 60);
+        $shop = qParam('w', 60);
         $page = max(1, (int)($_GET['page'] ?? 1));
         $per  = max(1, min(200, (int)($_GET['per'] ?? 10)));
         echo renderList($pdo, $q, $date, $shop, $page, $per);
@@ -415,7 +441,7 @@ if ($ajax !== '') {
            注：试过把聚合下推成 SQL 窗口函数（聚合 + ROW_NUMBER 两条查询），
            实测 3 千行 3ms→4ms、3 万行 29ms→35ms，反而更慢，且依赖 SQLite ≥3.25，
            对本机这体量不划算，维持 PHP 里循环的做法 */
-        $stmt = $pdo->prepare("SELECT i.id AS item_id, i.name, i.unit, i.qty, i.price,
+        $stmt = $pdo->prepare("SELECT i.id AS item_id, i.name, i.spec, i.unit, i.qty, i.price,
                                       b.id AS batch_id, b.odate
                                FROM items i JOIN batches b ON b.id = i.batch_id
                                WHERE b.wholesaler = :nm
@@ -437,6 +463,7 @@ if ($ajax !== '') {
             if (!isset($agg[$nm])) {
                 $agg[$nm] = [
                     'name'     => $nm,
+                    'spec'     => trim((string)$r['spec']),
                     'unit'     => (string)$r['unit'],
                     'times'    => 0,
                     'qty'      => 0.0,
@@ -463,6 +490,9 @@ if ($ajax !== '') {
                 $a['odate']    = (string)$r['odate'];
                 $a['batch_id'] = (int)$r['batch_id'];
                 $a['item_id']  = (int)$r['item_id'];
+                /* 规格跟着最新一条走；最新那条没填规格，就沿用上一次填过的 */
+                $sp = trim((string)$r['spec']);
+                if ($sp !== '') $a['spec'] = $sp;
             }
             unset($a);
         }
@@ -471,6 +501,7 @@ if ($ajax !== '') {
         foreach ($agg as $a) {
             $products[] = [
                 'name'  => $a['name'],
+                'spec'  => $a['spec'],
                 'unit'  => $a['unit'],
                 'times' => (int)$a['times'],
                 'qty'   => fmtNum($a['qty']),
@@ -511,7 +542,7 @@ if ($ajax !== '') {
     /* 某批发商的历史单价（录入进货单时给单价输入框做建议列表）
        返回 { 商品名: [{ price, odate, unit }, ...] }，按最新进货日期倒序，同价去重 */
     if ($ajax === 'prices') {
-        $wname = mb_substr(trim($_GET['w'] ?? ''), 0, 60);
+        $wname = qParam('w', 60);
         if ($wname === '') jsonOut(['ok' => true, 'wholesaler' => '', 'products' => []]);
 
         /* 每个商品最多 8 个「不同」的历史单价，按最新进货日期倒序。
@@ -548,15 +579,46 @@ if ($ajax !== '') {
         jsonOut(['ok' => true, 'wholesaler' => $wname, 'products' => $out]);
     }
 
+    /* 某批发商 + 某商品的历史规格（填写完商品名后给「规格」框做候选）
+       返回 { specs: [{ spec, times, odate }] }，按最近进货日期倒序，最多 12 条 */
+    if ($ajax === 'specs') {
+        $wname = qParam('w', 60);
+        $nm    = qParam('n', 120);
+        if ($nm === '') jsonOut(['ok' => true, 'specs' => []]);
+
+        $sql    = "SELECT i.spec AS spec, COUNT(*) AS times, MAX(b.odate) AS last_date
+                     FROM items i JOIN batches b ON b.id = i.batch_id
+                    WHERE i.name = :n AND TRIM(i.spec) <> ''";
+        $params = [':n' => $nm];
+        if ($wname !== '') {
+            $sql .= ' AND b.wholesaler = :w';      /* 有批发商就只看这家的规格 */
+            $params[':w'] = $wname;
+        }
+        $sql .= ' GROUP BY i.spec ORDER BY last_date DESC, times DESC LIMIT 12';
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+
+        $out = [];
+        foreach ($stmt->fetchAll() as $r) {
+            $out[] = [
+                'spec'  => (string)$r['spec'],
+                'times' => (int)$r['times'],
+                'odate' => (string)$r['last_date'],
+            ];
+        }
+        jsonOut(['ok' => true, 'specs' => $out]);
+    }
+
     /* 商品名联想：输入 2 个字以上按历史记录模糊匹配（空格分词，多个词都要命中）
        scope=wh（默认，且必须有 w）：只找这个批发商进过的商品
        scope=all：找所有批发商，候选上带各自最近一次的批发商名
        q 为空 = 「清点模式」：只报这家有多少种商品；少于 15 种时把整份清单直接给出来（免打字）
        返回字段：count/list，条目 name/unit/price/odate/times/wh */
     if ($ajax === 'names') {
-        $q = mb_substr(trim($_GET['q'] ?? ''), 0, 40);
+        $q = qParam('q', 40);
 
-        $wname = mb_substr(trim($_GET['w'] ?? ''), 0, 60);
+        $wname = qParam('w', 60);
         $scope = (string)($_GET['scope'] ?? '');
         if ($scope !== 'all') $scope = 'wh';
         if ($scope === 'wh' && $wname === '') $scope = 'all';   /* 没填批发商就只能全库找 */
@@ -628,7 +690,7 @@ if ($ajax !== '') {
         $ph = [];
         foreach ($names as $k => $_) $ph[] = ":n$k";
         $detail = [];
-        $sql2 = "SELECT i.name AS name, i.unit, i.price, b.odate, b.wholesaler
+        $sql2 = "SELECT i.name AS name, i.spec, i.unit, i.price, b.odate, b.wholesaler
                  FROM items i JOIN batches b ON b.id = i.batch_id
                  WHERE i.name IN (" . implode(',', $ph) . ")";
         $p = [];
@@ -645,6 +707,7 @@ if ($ajax !== '') {
             $nm = (string)$r['name'];
             if (isset($detail[$nm])) continue;      /* 只要最新那条 */
             $detail[$nm] = [
+                'spec'  => (string)$r['spec'],
                 'unit'  => (string)$r['unit'],
                 'price' => number_format((float)$r['price'], 2, '.', ''),
                 'odate' => (string)$r['odate'],
@@ -655,9 +718,10 @@ if ($ajax !== '') {
         $list = [];
         foreach ($rows as $r) {
             $nm = (string)$r['name'];
-            $d  = $detail[$nm] ?? ['unit' => '', 'price' => '', 'odate' => '', 'wh' => ''];
+            $d  = $detail[$nm] ?? ['spec' => '', 'unit' => '', 'price' => '', 'odate' => '', 'wh' => ''];
             $list[] = [
                 'name'    => $nm,
+                'spec'    => $d['spec'],
                 'unit'    => $d['unit'],
                 'price'   => $d['price'],
                 'odate'   => $d['odate'],
@@ -690,8 +754,8 @@ if ($ajax !== '') {
     }
 
     if ($ajax === 'wsave' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-        $data = json_decode(file_get_contents('php://input'), true);
-        if (!is_array($data)) jsonOut(['ok' => false, 'msg' => '数据格式错误'], 400);
+        $data = bodyJson();
+        if ($data === null) jsonOut(['ok' => false, 'msg' => '数据格式错误'], 400);
 
         $id      = (int)($data['id'] ?? 0);
         /* 名称截到 60 字，与进货单里存的批发商名保持同一上限，否则统计按名 JOIN 会对不上 */
@@ -745,7 +809,7 @@ if ($ajax !== '') {
     }
 
     if ($ajax === 'wdelete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-        $data = json_decode(file_get_contents('php://input'), true);
+        $data = bodyJson() ?? [];
         $id   = (int)($data['id'] ?? 0);
         if ($id <= 0) jsonOut(['ok' => false, 'msg' => '参数错误'], 400);
         $stmt = $pdo->prepare("DELETE FROM wholesalers WHERE id = :id");
@@ -773,8 +837,8 @@ if ($ajax !== '') {
     }
 
     if ($ajax === 'save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-        $data = json_decode(file_get_contents('php://input'), true);
-        if (!is_array($data)) jsonOut(['ok' => false, 'msg' => '数据格式错误'], 400);
+        $data = bodyJson();
+        if ($data === null) jsonOut(['ok' => false, 'msg' => '数据格式错误'], 400);
 
         $id         = (int)($data['id'] ?? 0);
         $wholesaler = trim((string)($data['wholesaler'] ?? ''));
@@ -810,6 +874,7 @@ if ($ajax !== '') {
 
             $clean[] = [
                 'name'  => $n,
+                'spec'  => mb_substr(trim((string)($it['spec'] ?? '')), 0, 30),
                 'unit'  => mb_substr(trim((string)($it['unit'] ?? '')), 0, 20),
                 'qty'   => $qty,
                 'price' => $price,
@@ -840,9 +905,9 @@ if ($ajax !== '') {
                 $id = (int)$pdo->lastInsertId();
             }
 
-            $ins = $pdo->prepare("INSERT INTO items (batch_id, name, unit, qty, price) VALUES (:b, :n, :u, :q, :p)");
+            $ins = $pdo->prepare("INSERT INTO items (batch_id, name, spec, unit, qty, price) VALUES (:b, :n, :s, :u, :q, :p)");
             foreach ($clean as $it) {
-                $ins->execute([':b'=>$id, ':n'=>$it['name'], ':u'=>$it['unit'], ':q'=>$it['qty'], ':p'=>$it['price']]);
+                $ins->execute([':b'=>$id, ':n'=>$it['name'], ':s'=>$it['spec'], ':u'=>$it['unit'], ':q'=>$it['qty'], ':p'=>$it['price']]);
             }
 
             /* 新出现的批发商名自动纳入批发商管理，保持两处口径一致 */
@@ -860,7 +925,7 @@ if ($ajax !== '') {
     }
 
     if ($ajax === 'delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-        $data = json_decode(file_get_contents('php://input'), true);
+        $data = bodyJson() ?? [];
         $id   = (int)($data['id'] ?? 0);
         if ($id <= 0) jsonOut(['ok' => false, 'msg' => '参数错误'], 400);
 
@@ -887,9 +952,9 @@ $stats    = getStats($pdo);
 syncWholesalers($pdo);
 /* 首屏只要下拉框用的名字，不再为此算每家的单数与金额（真正需要时由 ?ajax=whlist 拉） */
 $wholesalers = getWholesalerNames($pdo);
-$q        = mb_substr(trim($_GET['q'] ?? ''), 0, 60);
+$q        = qParam('q', 60);
 $date     = normalizeDate(trim($_GET['d'] ?? '')) ?? '';   /* 非法日期一律视为未筛选 */
-$shop     = mb_substr(trim($_GET['w'] ?? ''), 0, 60);
+$shop     = qParam('w', 60);
 $page     = max(1, (int)($_GET['page'] ?? 1));
 $perPage  = max(1, min(200, (int)($_GET['per'] ?? 10)));
 $listHtml = renderList($pdo, $q, $date, $shop, $page, $perPage);
@@ -1021,14 +1086,14 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
 .items-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;flex-wrap:wrap;}
 .items-head h3{margin:0;font-size:14px;font-weight:700;color:#3c4a60;letter-spacing:.3px;}
 .items-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:13px;background:#fbfcfe;}
-.items-table{width:100%;border-collapse:collapse;min-width:720px;font-size:14px;}
+.items-table{width:100%;border-collapse:collapse;min-width:800px;font-size:14.5px;}
 
 .items-table th{
     background:#f7f9fd;color:var(--muted);font-size:12.5px;font-weight:600;text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);white-space:nowrap;
 }
-.items-table th:nth-child(3),
 .items-table th:nth-child(4),
-.items-table th:nth-child(5) { text-align: right; }
+.items-table th:nth-child(5),
+.items-table th:nth-child(6) { text-align: right; }
 
 .items-table td{padding:9px 10px;border-bottom:1px solid #f1f5fb;}
 .items-table tbody tr:last-child td{border-bottom:none;}
@@ -1134,8 +1199,17 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
 }
 .chip-x:hover{color:var(--primary-strong);background:#dde8ff;}
 
+/* 列宽策略：除「#」「名称」列外，其余列一律按内容自适应，名称列吃掉剩余宽度。
+   进货记录明细表、批发商供货详情表都套这个类，不再各自写一份相同的规则 */
+.cols-fit{table-layout:auto;}
+.cols-fit th,
+.cols-fit td{white-space:nowrap;}
+.cols-fit th:nth-child(n+3),
+.cols-fit td:nth-child(n+3){width:1px;}
+.cols-fit .empty-row td{white-space:normal;}
+
 /* ---------- 通用数据表（批发商列表） ---------- */
-.data-table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:760px;}
+.data-table{width:100%;border-collapse:collapse;font-size:14.5px;min-width:760px;}
 .data-table th{
     background:#f7f9fd;color:var(--muted);font-size:12.5px;font-weight:600;text-align:left;
     padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap;
@@ -1143,8 +1217,34 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
 .data-table td{padding:11px 14px;border-bottom:1px solid #f1f5fb;color:#4a5a72;vertical-align:middle;}
 .data-table tbody tr:last-child td{border-bottom:none;}
 .data-table tbody tr:hover{background:#f7f9fc;}
-.data-table .num{text-align:right;font-variant-numeric:tabular-nums;}
-.data-table .wh-name{font-weight:600;color:var(--primary-strong);}
+.data-table .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+/* 联系人保持单行；电话可能填了好几个号码，允许在空格处折行 */
+#shopListCard .data-table td:nth-child(3){white-space:nowrap;}
+#shopListCard .data-table td.ph-cell{font-size:13.5px;}
+#shopListCard .data-table td.ph-cell .ph-line{display:block;white-space:nowrap;}
+.data-table .wh-name{font-weight:600;color:var(--primary-strong);white-space:nowrap;min-width:120px;}
+/* 批发商列表：备注列不再占表头，7 列时给名称列留够宽度，窄窗口走横向滚动而不是把名字压成竖排 */
+#shopListCard .data-table{min-width:720px;}
+/* 批发商列表：备注单独占一行，跨满所有列，文字与「批发商」列左边界对齐；
+   上面那行底边框去掉，整组共用一条分隔线，比两行各留 padding 矮一截 */
+/* 有备注的行：主行底部不留空白，备注行顶部不留空白，两行贴着，看着就是一行两排 */
+#shopListCard .data-table tr.has-note td{border-bottom:0;padding-bottom:3px;}
+/* 鼠标停在主行或备注行的任意一半，两半一起高亮，不出现一半亮一半灰 */
+#shopListCard .data-table tr.has-note.ro-hover td,
+#shopListCard .data-table tr.has-note:hover td,
+#shopListCard .data-table tr.has-note:hover + .shop-note-row td,
+#shopListCard .data-table tr.shop-note-row.ro-hover td,
+#shopListCard .data-table tr.shop-note-row:hover td{background:#f4f8ff;}
+/* 备注行拆成两格：第一格空着占「#」列，第二格跨后面 6 列。
+   这样无论表格被拉多宽，备注文字都跟「批发商」列的文字严格左对齐 */
+#shopListCard .shop-note-row td{
+    border-bottom:1px solid #f1f5fb;
+    padding:0 14px 10px;
+    font-size:12px;line-height:1.5;color:#8a97ab;
+    white-space:normal;word-break:break-word;
+}
+#shopListCard .shop-note-row td.note-pad{padding:0;}
+#shopListCard .data-table tbody tr:last-child td{border-bottom:none;}
 .data-table .muted{color:var(--muted-light);}
 .data-table .idx-cell{color:var(--muted-light);font-size:12.5px;text-align:center;font-variant-numeric:tabular-nums;}
 .data-table .ops{text-align:center;white-space:nowrap;}
@@ -1183,7 +1283,12 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
 .detail-head .dh-money b{color:var(--primary-strong);font-variant-numeric:tabular-nums;}
 .detail-head .dh-muted{color:var(--muted-light);font-weight:400;}
 .data-table .detail-new-price{font-weight:700;color:var(--primary-strong);font-variant-numeric:tabular-nums;}
-.data-table .pd-name{font-weight:600;color:#22314a;}
+.data-table .pd-name{font-weight:600;color:#22314a;white-space:nowrap;min-width:160px;}
+
+.data-table .pd-name .sp{
+    display:block;margin-top:2px;white-space:nowrap;
+    font-size:10.5px;font-weight:400;line-height:0.8;color:#9aa7ba;letter-spacing:.2px;
+}
 
 /* 批发商详情：商品搜索条 */
 .detail-bar{
@@ -1225,7 +1330,10 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
 .batch-shop em{font-style:normal;color:var(--muted-light);font-weight:400;}
 .batch-right{display:flex;align-items:center;gap:10px;}
 .batch-body{overflow-x:auto;}
-.batch-items{width:100%;border-collapse:collapse;font-size:13.5px;min-width:580px;}
+.batch-items{width:100%;border-collapse:collapse;font-size:14.5px;min-width:600px;}
+/* # 号列固定窄一点，不跟着内容撑开 */
+.batch-items th:first-child,
+.batch-items td.idx-cell{width:34px;}
 
 /* 列表表格表头：加粗、手形、去文字选择 */
 .batch-items th{
@@ -1234,9 +1342,9 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
     cursor: pointer; user-select: none; transition: background-color 0.15s, color 0.15s;
 }
 .batch-items th:hover { background: #f4f7fc; color: #3f68e8; }
+/* 只让「数量」「单价」表头右对齐（小计自带 inline 右对齐）；单位仍是左对齐，和内容一致 */
 .batch-items th:nth-child(4),
-.batch-items th:nth-child(5),
-.batch-items th:nth-child(6) { text-align: right; }
+.batch-items th:nth-child(5) { text-align: right; }
 
 .batch-items th:first-child,
 .batch-items td.idx-cell {
@@ -1244,14 +1352,19 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
     padding-right: 4px;
 }
 
-.batch-items td{padding:10px 16px;border-bottom:1px solid #f5f8fc;color:#4a5a72;}
+.batch-items td{padding:10px 16px;border-bottom:1px solid #f5f8fc;color:#4a5a72;vertical-align:middle;}
 .batch-items tbody tr:last-child td{border-bottom:none;}
-.batch-items .name-cell{font-weight:600;color:#22314a;}
+.batch-items .name-cell{font-weight:600;color:#22314a;white-space:nowrap;}
+/* 规格挂在名称下面一行：小一号、颜色淡，没填就不出现 */
+.batch-items .name-cell .sp{
+    display:block;margin-top:2px;white-space:nowrap;
+    font-size:10.5px;font-weight:400;line-height:0.8;color:#9aa7ba;letter-spacing:.2px;
+}
 
 .batch-items tbody tr { transition: background-color 0.15s ease; }
 .batch-items tbody tr:hover { background-color: #f7f9fc; }
 
-.batch-items .num{font-variant-numeric:tabular-nums;text-align: right;}
+.batch-items .num{font-variant-numeric:tabular-nums;text-align: right;white-space:nowrap;}
 .batch-items .sub{font-weight:600;color:var(--primary-strong);font-variant-numeric:tabular-nums;text-align: right;}
 .batch-items .idx-cell{color:var(--muted-light);font-size:12px;text-align:center;font-variant-numeric:tabular-nums;}
 
@@ -1308,30 +1421,61 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 .toast.error{border-color:#ffc9cf;color:#d63a4d;background:#fff6f7;}
 
 /* ---------- 打印样式 (A4) ---------- */
+/* 打印排版样式只维护这一份：#printArea 平时隐藏，屏幕上看不见；
+   页面内打印（@media print）和 iframe 打印窗口共用同一份规则，
+   JS 里不再重复写一套，改样式只改这里 */
 #printArea { display: none; }
-@media print {
-    @page { size: A4; margin: 15mm; }
-    body { background: #fff; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .wrap, .toast, .price-tip { display: none !important; }
-    #printArea { 
-        display: block !important; 
-        width: 100%; 
-        max-width: 100%;
-        color: #000;
-        font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-    }
-    .print-header { text-align: center; margin-bottom: 24px; }
-    .print-header h2 { font-size: 26px; margin: 0; letter-spacing: 4px; }
-    .print-meta { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 14px; border-bottom: 1px solid #000; padding-bottom: 8px; }
-    .print-meta div { line-height: 1.8; }
-    .print-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px; }
-    .print-table th, .print-table td { border: 1px solid #000; padding: 8px 12px; text-align: left; }
-    .print-table th { background: #f5f5f5 !important; font-weight: 600; }
-    .print-table .num { text-align: right; }
-    .print-footer { display: flex; justify-content: space-between; font-weight: bold; font-size: 15px; padding: 10px 0; border-top: 1px solid #000; border-bottom: 1px solid #000; margin-bottom: 20px; }
-    .print-note { font-size: 14px; line-height: 1.6; margin-top: 20px; }
+#printArea {
+    width: 100%;
+    max-width: 100%;
+    color: #000;
+    font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
 }
+#printArea .print-header { text-align: center; margin-bottom: 18px; }
+#printArea .print-header h2 { font-size: 24px; margin: 0; letter-spacing: 4px; }
+#printArea .print-meta { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 14px; border-bottom: 1px solid #000; padding-bottom: 6px; }
+#printArea .print-meta div { line-height: 1.8; }
+#printArea .print-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 13px; table-layout: auto; }
+#printArea .print-table th,
+#printArea .print-table td { border: 1px solid #000; padding: 7px 10px; text-align: left; white-space: nowrap; }
+/* 行不要跨页断开，避免最后一行被硬拆到第二页 */
+#printArea .print-table tr { page-break-inside: avoid; break-inside: avoid; }
+/* 其余列按内容自适应，商品名称列吃掉剩余宽度（不参与自适应，避免把数字列撑宽/挤窄） */
+#printArea .print-table th:nth-child(2),
+#printArea .print-table td:nth-child(2) { width: 100%; white-space: normal; }
+/* 单位列内容短，居中更整齐 */
+#printArea .print-table th:nth-child(3),
+#printArea .print-table td:nth-child(3) { text-align: center; }
+#printArea .print-table th { background: #f5f5f5 !important; font-weight: 600; }
+#printArea .print-table .num { text-align: right; }
+#printArea .print-table .sp { font-size: 11px; font-weight: 400; color: #444; margin-left: 2px; }
+#printArea .print-footer { display: flex; justify-content: space-between; font-weight: bold; font-size: 15px; padding: 8px 0; border-top: 1px solid #000; border-bottom: 1px solid #000; margin-bottom: 0; }
+#printArea .print-note { font-size: 14px; line-height: 1.6; margin-top: 12px; }
+/* 抬头、元信息、合计、备注都不许被拆到下一页 */
+#printArea .print-header,
+#printArea .print-meta,
+#printArea .print-footer,
+#printArea .print-note { page-break-inside: avoid; break-inside: avoid; }
 
+@media print {
+    /* 手机打印常因 body 撑满一屏 + 上下内边距而多出一页空白，这里全部压平 */
+    @page { size: A4 portrait; margin: 12mm; }
+    html, body {
+        height: auto !important;
+        min-height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #fff !important;
+        overflow: visible !important;
+        -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    }
+    .wrap, .toast, .price-tip { display: none !important; }
+    #printArea {
+        display: block !important;
+        page-break-after: avoid;
+        break-after: avoid;
+    }
+}
 /* ---------- 响应式 ---------- */
 @media (max-width:960px){
     .stats{grid-template-columns:repeat(2,1fr);}
@@ -1378,17 +1522,38 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     #shopListCard .data-table th,
     #shopListCard .data-table td{width:auto !important;padding:9px 5px;font-size:12.5px;}
     #shopListCard .data-table thead th{white-space:nowrap;font-size:11.5px;font-weight:600;}
-    #shopListCard .data-table td:nth-child(7){font-size:12px;}
-    /* 隐藏第 3、4、5 列：联系人 / 电话 / 备注 */
+    #shopListCard .data-table td:nth-child(6){font-size:12px;}
+    /* 隐藏第 3、4 列：联系人 / 电话（备注已单独成行，不在表里） */
     #shopListCard .data-table th:nth-child(3),
     #shopListCard .data-table th:nth-child(4),
-    #shopListCard .data-table th:nth-child(5),
     #shopListCard .data-table td:nth-child(3),
-    #shopListCard .data-table td:nth-child(4),
-    #shopListCard .data-table td:nth-child(5){display:none;}
+    #shopListCard .data-table td:nth-child(4){display:none;}
+    /* 备注行：窄屏下缩进收小，跨满整行 */
+    #shopListCard .shop-note-row td{padding:0 5px 7px;font-size:11.5px;}
     #shopListCard .data-table td:nth-child(2){white-space:normal;word-break:break-word;}
     #shopListCard .data-table .ops .btn-mini{padding:4px 6px;margin:0 2px;font-size:11px;}
     #shopListCard .data-table .idx-cell{padding-left:8px;}
+}
+
+/* ---------- 批发商详情：窄窗口收紧内边距与字号 ----------
+   8 列（名称下还带规格）在 900px 以下容易被挤到换行、最后一列贴边；
+   收紧 padding 后名称与数值都能放下，仍放不下就横向滚动，不会把列挤变形。 */
+@media (max-width:900px){
+    #shopDetailCard .data-table{font-size:13.5px;min-width:0;}
+    #shopDetailCard .data-table th,
+    #shopDetailCard .data-table td{padding:9px 8px;}
+    #shopDetailCard .data-table .pd-name{min-width:0;}
+
+    /* 录入明细：窄窗口里 6 个输入框按原宽度放不下，会裁掉「小计」和删除按钮；按比例收紧列宽 */
+    .items-table{min-width:0;font-size:13.5px;}
+    .items-table th,
+    .items-table td{padding:8px 6px;}
+    .items-table th:nth-child(2){width:104px !important;}
+    .items-table th:nth-child(3){width:76px  !important;}
+    .items-table th:nth-child(4){width:96px  !important;}
+    .items-table th:nth-child(5){width:104px !important;}
+    .items-table th:nth-child(6){width:90px  !important;}
+    .items-table th:nth-child(7){width:44px  !important;}
 }
 </style>
 </head>
@@ -1558,12 +1723,11 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                         <tr>
                             <th class="sortable" style="width:44px;text-align:center" data-sort="index" data-label="#" title="点击恢复默认顺序">#</th>
                             <th>批发商</th>
-                            <th style="width:110px">联系人</th>
-                            <th style="width:140px">电话</th>
-                            <th>备注</th>
-                            <th class="sortable" style="width:110px;text-align:right" data-sort="orders" data-label="进货单数" title="点击排序">进货单数</th>
-                            <th class="sortable" style="width:140px;text-align:right" data-sort="amount" data-label="累计金额" title="点击排序">累计金额</th>
-                            <th style="width:140px;text-align:center">操作</th>
+                            <th style="width:86px">联系人</th>
+                            <th style="width:146px">电话</th>
+                            <th class="sortable" style="width:90px;text-align:right" data-sort="orders" data-label="进货单数" title="点击排序">进货单数</th>
+                            <th class="sortable" style="width:116px;text-align:right" data-sort="amount" data-label="累计金额" title="点击排序">累计金额</th>
+                            <th style="width:100px;text-align:center">操作</th>
                         </tr>
                     </thead>
                     <tbody id="shopBox"></tbody>
@@ -1589,17 +1753,17 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             </div>
 
             <div class="items-wrap">
-                <table class="data-table">
+                <table class="data-table cols-fit">
                     <thead>
                         <tr>
-                            <th style="width:44px;text-align:center">#</th>
-                            <th>商品名称</th>
-                            <th style="width:100px">单位</th>
-                            <th style="width:110px;text-align:right">进货次数</th>
-                            <th style="width:120px;text-align:right">累计数量</th>
-                            <th style="width:130px;text-align:right">最新单价</th>
-                            <th style="width:130px;text-align:right">最新报价日期</th>
-                            <th style="width:170px;text-align:right">历史价格区间</th>
+                            <th class="sortable" style="width:44px;text-align:center" data-sort="index" data-label="#" title="点击恢复默认顺序">#</th>
+                            <th class="sortable" data-sort="name" data-label="商品名称" title="点击排序">商品名称</th>
+                            <th class="sortable" data-sort="unit" data-label="单位" title="点击排序">单位</th>
+                            <th class="sortable" style="text-align:right" data-sort="times" data-label="进货次数" title="点击排序">进货次数</th>
+                            <th class="sortable" style="text-align:right" data-sort="qty" data-label="累计数量" title="点击排序">累计数量</th>
+                            <th class="sortable" style="text-align:right" data-sort="price" data-label="最新单价" title="点击排序">最新单价</th>
+                            <th class="sortable" style="text-align:right" data-sort="odate" data-label="最新报价日期" title="点击排序">最新报价日期</th>
+                            <th class="sortable" style="text-align:right" data-sort="range" data-label="历史价格区间" title="点击排序">历史价格区间</th>
                         </tr>
                     </thead>
                     <tbody id="shopDetailBox"></tbody>
@@ -1651,7 +1815,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                         <thead>
                             <tr>
                                 <th>商品名称<span class="req">*</span></th>
-                                <th style="width:120px">单位</th>
+                                <th style="width:150px">规格</th>
+                                <th style="width:110px">单位</th>
                                 <th style="width:130px;text-align:right">数量</th>
                                 <th style="width:150px;text-align:right">单价（元）</th>
                                 <th style="width:140px;text-align:right">小计</th>
@@ -1720,6 +1885,11 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         const pat = esc(kw).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         return html.replace(new RegExp('(' + pat + ')', 'gi'), '<mark class="hl">$1</mark>');
     }
+
+    /* 空值占位、空数据行：表格渲染里这两处重复最多，统一成一行调用 */
+    const DASH = '<span class="muted">—</span>';
+    const orDash = (v) => v ? esc(v) : DASH;
+    const emptyRow = (cols, msg) => '<tr class="empty-row"><td colspan="' + cols + '">' + msg + '</td></tr>';
 
     /* ===== 日期校验：拒绝 2 月 31 日、13 月、0 日这类不存在的日期 ===== */
     const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -2162,6 +2332,79 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         if (priceTipRow) showPriceTip(priceTipRow);   /* 浮层开着就跟着刷新 */
     }
 
+    /* ---------- 规格建议：填完商品名后，把这个货以前用过的规格挂到 datalist ---------- */
+    const specCache   = new Map();   /* 「批发商|商品名」-> [{ spec, times, odate }] */
+    const specPending = new Set();
+    let   specSeq     = 0;
+
+    /* 每行一个独立 datalist：多行共用一个会把彼此的候选互相冲掉 */
+    function specDatalist(specEl) {
+        if (!specEl.dataset.dl) {
+            specEl.dataset.dl = 'specdl-' + (++specSeq);
+            specEl.setAttribute('list', specEl.dataset.dl);
+        }
+        const id = specEl.dataset.dl;
+        let dl = document.getElementById(id);
+        if (!dl) {
+            dl = document.createElement('datalist');
+            dl.id = id;
+            document.body.appendChild(dl);
+        }
+        return dl;
+    }
+
+    function fillSpecOptions(dl, list) {
+        if (!dl) return;
+        dl.innerHTML = list.map((s) =>
+            '<option value="' + esc(s.spec) + '"'
+            + (s.times > 1 ? ' label="进过 ' + s.times + ' 次"' : '')
+            + '></option>'
+        ).join('');
+    }
+
+    /* 只按「当前批发商 + 该行商品名」取规格；商品名空着就直接清空候选 */
+    async function ensureSpecOptions(tr) {
+        if (!tr) return;
+        const nameEl = tr.querySelector('.i-name');
+        const specEl = tr.querySelector('.i-spec');
+        if (!nameEl || !specEl) return;
+
+        const dl = specDatalist(specEl);
+        const nm = nameEl.value.trim();
+        const wn = currentWholesaler();
+        if (!nm) { dl.innerHTML = ''; return; }
+
+        const key = wn + '|' + nm;
+        if (specCache.has(key)) { fillSpecOptions(dl, specCache.get(key)); return; }
+        if (specPending.has(key)) return;
+
+        specPending.add(key);
+        try {
+            const d = await getJSON('?ajax=specs&w=' + encodeURIComponent(wn) + '&n=' + encodeURIComponent(nm));
+            const list = (d && d.ok && Array.isArray(d.specs)) ? d.specs : [];
+            specCache.set(key, list);
+            /* 请求回来时这行可能已经改了名，只有还是同一家同一个货才回填 */
+            if (nameEl.isConnected && nameEl.value.trim() === nm && currentWholesaler() === wn) {
+                fillSpecOptions(dl, list);
+            }
+        } catch (e) {
+            /* 规格候选拿不到不影响录入 */
+        } finally {
+            specPending.delete(key);
+        }
+    }
+
+    /* 商品名打完字再拉规格候选：边打边发请求没必要，260ms 静默后再取 */
+    let specTimer = 0;
+    let specTimerRow = null;
+    function scheduleSpecOptions(tr) {
+        specTimerRow = tr;
+        clearTimeout(specTimer);
+        specTimer = setTimeout(() => {
+            if (specTimerRow && specTimerRow.isConnected) ensureSpecOptions(specTimerRow);
+        }, 260);
+    }
+
     /* 商品名正好命中历史记录、而单位还空着 → 顺手把单位补上，少敲一次 */
     function maybeFillUnit(tr) {
         if (!tr) return;
@@ -2294,6 +2537,13 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         }
 
         tr.querySelector('.i-name').value = item.name;
+
+        /* 规格空着就用这个货最近一次的规格填上，接着刷新候选 */
+        const specEl = tr.querySelector('.i-spec');
+        if (specEl) {
+            if (specEl.value.trim() === '' && item.spec) specEl.value = item.spec;
+            ensureSpecOptions(tr);
+        }
 
         const unitEl = tr.querySelector('.i-unit');
         if (unitEl && unitEl.value.trim() === '' && item.unit) unitEl.value = item.unit;
@@ -2501,6 +2751,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     function rowHTML() {
         return '<tr class="item-row">'
             + '<td><input class="i-name" placeholder="商品名称" autocomplete="off"></td>'
+            + '<td><input class="i-spec" placeholder="选填规格" autocomplete="off"></td>'
             + '<td><input class="i-unit" placeholder="箱 / 个"></td>'
             + '<td><input class="i-qty" type="number" step="1" min="0" data-prec="0" data-last="1" value="1"></td>'
             + '<td><input class="i-price" type="text" inputmode="decimal" value="0.00" autocomplete="off" placeholder="0.00"></td>'
@@ -2520,6 +2771,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 
         if (data) {
             tr.querySelector('.i-name').value  = data.name  || '';
+            tr.querySelector('.i-spec').value  = data.spec  || '';
             tr.querySelector('.i-unit').value  = data.unit  || '';
             tr.querySelector('.i-qty').value   = (data.qty   !== undefined && data.qty   !== null) ? data.qty   : 1;
             tr.querySelector('.i-price').value = (data.price !== undefined && data.price !== null) ? data.price : 0;
@@ -2533,9 +2785,9 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 
     /* 行内取值：表格结构由 rowHTML 固定，直接按单元格下标取，比每行两次 querySelector 快；
        万一结构被动过，退回按类名查找，不会因为拿不到节点就把金额算成 0 */
-    const CELL_QTY = 2;
-    const CELL_PRICE = 3;
-    const CELL_SUB = 4;
+    const CELL_QTY = 3;
+    const CELL_PRICE = 4;
+    const CELL_SUB = 5;
 
     function cellInput(tr, idx) {
         const cell = tr.cells && tr.cells[idx];
@@ -2592,7 +2844,11 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             const tr = t.closest('tr');
             hidePriceTip();                             /* 名称变了，旧价格提示作废 */
             maybeFillUnit(tr);
+            /* 名称还在改，旧的规格候选先清掉，静默后再按新名称拉一遍 */
+            const specEl = tr.querySelector('.i-spec');
+            if (specEl) specDatalist(specEl).innerHTML = '';
             scheduleNameSuggest(tr, t.value.trim());
+            scheduleSpecOptions(tr);
             return;
         }
 
@@ -2631,6 +2887,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 
     on(itemsBody, 'change', (e) => {
         const t = e.target;
+        /* 商品名定格（Tab / 回车 / 失焦）→ 立刻把规格候选准备好 */
+        if (t.classList.contains('i-name')) ensureSpecOptions(t.closest('tr'));
         if (t.classList.contains('i-qty')) syncQtyStep(t);
         /* 单价：失焦统一成两位小数；负数归零并刷新小计 */
         if (t.classList.contains('i-price')) {
@@ -2660,6 +2918,12 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             maybeFillUnit(t.closest('tr'));
             /* 点进名称框就试一把：这家种类少于 15，直接列清单，一个字都不用打 */
             openNamePicker(t.closest('tr'));
+        }
+
+        /* 点进规格框：按当前商品名把历史规格补一遍（名称是自动填的也会有候选） */
+        if (t.classList.contains('i-spec')) {
+            hideNameTip();
+            ensureSpecOptions(t.closest('tr'));
         }
     });
 
@@ -2840,10 +3104,12 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             const name = nameEl.value.trim();
             if (!name) continue;
             const unitEl  = tr.querySelector('.i-unit');
+            const specEl  = tr.querySelector('.i-spec');
             const qtyEl   = tr.querySelector('.i-qty');
             const priceEl = tr.querySelector('.i-price');
             items.push({
                 name:  name,
+                spec:  specEl  ? specEl.value.trim() : '',
                 unit:  unitEl  ? unitEl.value.trim() : '',
                 qty:   qtyEl   ? (parseFloat(qtyEl.value)   || 0) : 0,
                 price: priceEl ? (parseFloat(priceEl.value) || 0) : 0
@@ -3017,8 +3283,9 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             /* 先取值再排序：比较函数里不再重复读 DOM 和解析数字 */
             const decorated = rows.map((row) => {
                 const cell = row.cells[colIdx - 1];
-                const text = cell ? cell.textContent.trim() : '';
-                return { row: row, v: isNum ? (parseFloat(text.replace(/[^\d.-]/g, '')) || 0) : text };
+                /* 名称格里还挂着规格小字，排序要取 data-v 上的纯名称 */
+                const raw  = cell ? (cell.dataset && cell.dataset.v ? cell.dataset.v : cell.textContent.trim()) : '';
+                return { row: row, v: isNum ? (parseFloat(raw.replace(/[^\d.-]/g, '')) || 0) : raw };
             });
 
             decorated.sort((a, b) => {
@@ -3065,9 +3332,14 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         $$('.batch-items tbody tr', card).forEach((tr) => {
             const tds = tr.cells;
             if (tds.length < 6) return;             /* 结构异常的行直接跳过，别让打印崩掉 */
+            const nmCell = tds[1];
+            const spEl   = nmCell.querySelector('.sp');
+            const nmTxt  = nmCell.dataset.v || (spEl ? nmCell.textContent.replace(spEl.textContent, '') : nmCell.textContent);
             html += '<tr>'
                 + '<td>' + esc(tds[0].textContent) + '</td>'
-                + '<td>' + esc(tds[1].textContent) + '</td>'
+                + '<td>' + esc(nmTxt)
+                    + (spEl ? '<span class="sp">（' + esc(spEl.textContent) + '）</span>' : '')
+                    + '</td>'
                 + '<td>' + esc(tds[2].textContent) + '</td>'
                 + '<td class="num">' + esc(tds[3].textContent) + '</td>'
                 + '<td class="num">' + esc(tds[4].textContent) + '</td>'
@@ -3083,6 +3355,135 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         if (noteTxt) html += '<div class="print-note"><strong>备注：</strong>' + esc(noteTxt) + '</div>';
 
         return html;
+    }
+
+    /* 打印排版样式直接从页面样式表里取（选择器以 #printArea 开头的那些规则），
+       打印窗口和页面内打印共用同一份，不再在 JS 里复制一遍。
+       只补几条打印窗口自己需要的页面级设置 */
+    function collectPrintCss() {
+        const out = [];
+        Array.from(document.styleSheets || []).forEach((sheet) => {
+            let rules = null;
+            try { rules = sheet.cssRules; } catch (e) { rules = null; }   /* 跨域样式表读不了，跳过 */
+            if (!rules) return;
+            Array.from(rules).forEach((rule) => {
+                const txt = (rule && rule.cssText) ? rule.cssText : '';
+                if (txt.indexOf('#printArea') === 0) out.push(txt);
+            });
+        });
+        return out.join('\n');
+    }
+    const PRINT_CSS  = collectPrintCss();
+    const PRINT_PAGE = '@page{size:A4 portrait;margin:12mm;}'
+        + 'html,body{margin:0;padding:0;height:auto;min-height:0;background:#fff;color:#000;'
+        + '-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+        + '#printArea{display:block !important;}';
+    /* 打印一张进货单：用隐藏 iframe 排版打印，打印完立刻拆掉。
+       不再开新标签页，取消打印后不会残留一个 about:blank / 打印样式的窗口。
+       iOS 的 iframe 不支持 print()，退回页面内打印区。
+
+       连点保护：同一时刻只允许一次打印。
+       正在打印时再点，直接忽略（不会又弹一个对话框）；
+       取消/打印结束后立刻解锁，可以马上再点。 */
+    let printBusy = false;
+    function printBatch(card) {
+        if (printBusy) { toast('正在打印，等这个对话框关掉再点'); return; }
+
+        const html = buildPrintHTML(card);
+        const doc  = '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">'
+            + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            + '<title>进货单</title><style>' + PRINT_CSS + PRINT_PAGE + '</style></head>'
+            + '<body><div id="printArea">' + html + '</div></body></html>';
+
+        const ua = navigator.userAgent || '';
+        const iOS = /iPad|iPhone|iPod/.test(ua)
+            || (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1);
+        if (iOS) {
+            printBusy = true;
+            printArea.innerHTML = html;
+            const unlock = () => { printBusy = false; };
+            window.addEventListener('afterprint', unlock, { once: true });
+            const t = setTimeout(unlock, 15000);      /* 兜底解锁 */
+            try {
+                const t0 = performance.now();
+                window.print();                        /* Safari 上是异步返回，对话框还开着 */
+                if (performance.now() - t0 > 150) {    /* 同步阻塞型：返回即已关闭 */
+                    clearTimeout(t);
+                    window.removeEventListener('afterprint', unlock);
+                    unlock();
+                }
+            } catch (e) {
+                clearTimeout(t);
+                unlock();
+            }
+            return;
+        }
+
+        printBusy = true;
+
+        let frame = null;
+        try { frame = document.createElement('iframe'); } catch (e) { frame = null; }
+
+        /* 兜底：iframe 用不了就退回页面内打印 */
+        const fallback = () => {
+            if (frame && frame.parentNode) frame.parentNode.removeChild(frame);
+            printArea.innerHTML = html;
+            window.print();
+            printBusy = false;
+        };
+
+        if (!frame) { fallback(); return; }
+
+        frame.setAttribute('aria-hidden', 'true');
+        frame.setAttribute('tabindex', '-1');
+        frame.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none;';
+        document.body.appendChild(frame);
+
+        /* 统一清理：打印对话框关掉（打印或取消）后拆掉 iframe，同时解锁。
+           再挂一个 15 秒兜底，避免某个浏览器不触发 afterprint 时 iframe 一直挂着、按钮一直锁着。 */
+        let removed = false;
+        let unlockTimer = null;
+        const cleanup = () => {
+            if (unlockTimer) { clearTimeout(unlockTimer); unlockTimer = null; }
+            printBusy = false;
+            if (removed) return;
+            removed = true;
+            setTimeout(() => {
+                try { if (frame.parentNode) frame.parentNode.removeChild(frame); } catch (e) {}
+            }, 400);
+        };
+        unlockTimer = setTimeout(cleanup, 15000);
+
+        /* 同一时间只留一个打印壳子 */
+        document.querySelectorAll('iframe[data-print-frame]').forEach((f) => {
+            try { if (f.parentNode) f.parentNode.removeChild(f); } catch (e) {}
+        });
+        frame.setAttribute('data-print-frame', '1');
+
+        try {
+            const fd = frame.contentWindow.document;
+            fd.open();
+            fd.write(doc);
+            fd.close();
+            frame.contentWindow.onafterprint = cleanup;
+
+            setTimeout(() => {
+                /* 期间被新的一次打印顶掉、或已拆掉，就静默退出，不再弹第二个对话框 */
+                if (!frame.parentNode) { printBusy = false; return; }
+                try {
+                    frame.contentWindow.focus();
+                    const t0 = performance.now();
+                    frame.contentWindow.print();
+                    const cost = performance.now() - t0;
+                    /* 同步阻塞型（桌面）：返回时对话框已关闭，可立刻拆 */
+                    if (cost > 150) cleanup();
+                } catch (e) {
+                    fallback();
+                }
+            }, 250);
+        } catch (e) {
+            fallback();
+        }
     }
 
     on(listBox, 'click', async (e) => {
@@ -3130,8 +3531,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         /* ---- 打印 ---- */
         const printBtn = e.target.closest('.js-print');
         if (printBtn) {
-            printArea.innerHTML = buildPrintHTML(printBtn.closest('.batch'));
-            window.print();
+            printBatch(printBtn.closest('.batch'));
             return;
         }
 
@@ -3217,11 +3617,14 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     const clearDetailKw   = $('clearDetailKeyword');
     const detailCount     = $('detailCount');
     const panelShopThead  = document.querySelector('#panel-shop thead');
+    const panelDetailThead = document.querySelector('#shopDetailCard thead');
 
     let shopData    = [];
     let shopSortKey = '';
     let shopSortDir = 'desc';
     let detailProducts = [];
+    let detailSortKey = '';
+    let detailSortDir = 'desc';
 
     const shopAmountText = (w) => String(w.amount || '0');
     const shopAmountNum  = (w) => w._amount !== undefined ? w._amount : (parseFloat(shopAmountText(w).replace(/,/g, '')) || 0);
@@ -3268,19 +3671,20 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         }
 
         if (!rows.length) {
-            shopBox.innerHTML = '<tr class="empty-row"><td colspan="8">'
-                + (kw ? '没有匹配的批发商' : '暂无批发商，先在上方新增一个吧')
-                + '</td></tr>';
+            shopBox.innerHTML = emptyRow(7, kw ? '没有匹配的批发商' : '暂无批发商，先在上方新增一个吧');
             return;
         }
 
-        shopBox.innerHTML = rows.map((w, idx) =>
-            '<tr class="row-click js-shop-open" data-id="' + w.id + '" data-name="' + esc(w.name) + '" title="查看商品与最新报价">'
+        shopBox.innerHTML = rows.map((w, idx) => {
+            const note = (w.note || '').trim();
+            return '<tr class="row-click js-shop-open' + (note ? ' has-note' : '') + '" data-id="' + w.id + '" data-name="' + esc(w.name) + '" title="查看商品与最新报价">'
             + '<td class="idx-cell">' + (idx + 1) + '</td>'
-            + '<td class="wh-name">' + esc(w.name) + '</td>'
-            + '<td>' + (w.contact ? esc(w.contact) : '<span class="muted">—</span>') + '</td>'
-            + '<td>' + (w.phone   ? esc(w.phone)   : '<span class="muted">—</span>') + '</td>'
-            + '<td>' + (w.note    ? esc(w.note)    : '<span class="muted">—</span>') + '</td>'
+            + '<td class="wh-name">' + hl(w.name, kw) + '</td>'
+            + '<td>' + (w.contact ? hl(w.contact, kw) : DASH) + '</td>'
+            + '<td class="ph-cell">' + (w.phone
+                ? String(w.phone).split(/[,，、;；\/]+/).map((p) => p.trim()).filter(Boolean)
+                    .map((p) => '<span class="ph-line">' + hl(p, kw) + '</span>').join('')
+                : DASH) + '</td>'
             + '<td class="num">' + w.orders + '</td>'
             + '<td class="num">￥' + esc(w.amount) + '</td>'
             + '<td class="ops">'
@@ -3288,7 +3692,14 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             +   '<button type="button" class="btn-mini danger js-shop-del" data-id="' + w.id + '">删除</button>'
             + '</td>'
             + '</tr>'
-        ).join('');
+            /* 备注单独一行：跨所有列，文字与「批发商」列左边界对齐；没填备注就不占这一行 */
+            + (note
+                ? '<tr class="shop-note-row js-shop-open" data-id="' + w.id + '" data-name="' + esc(w.name) + '" title="查看商品与最新报价">'
+                    + '<td class="note-pad"></td>'
+                    + '<td colspan="6">备注：' + hl(note, kw) + '</td>'
+                    + '</tr>'
+                : '');
+        }).join('');
     }
 
     /* 表头点击排序：进货单数 / 累计金额，点 # 恢复默认顺序 */
@@ -3449,6 +3860,25 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         if (row) openShopDetail(row.dataset.id, row.dataset.name);
     });
 
+    /* 备注行和它的主行算一组：鼠标停在备注上，主行也一起高亮 */
+    on(shopBox, 'mouseover', (e) => {
+        const tr = e.target.closest('tr');
+        let target = null;
+        let group = null;
+        if (tr && tr.classList.contains('shop-note-row')) {
+            const prev = tr.previousElementSibling;
+            if (prev && prev.classList.contains('has-note')) { target = prev; group = tr; }
+        }
+        shopBox.querySelectorAll('tr.ro-hover').forEach((r) => {
+            if (r !== target && r !== group) r.classList.remove('ro-hover');
+        });
+        if (target) target.classList.add('ro-hover');
+        if (group) group.classList.add('ro-hover');
+    });
+    on(shopBox, 'mouseleave', () => {
+        shopBox.querySelectorAll('tr.ro-hover').forEach((r) => r.classList.remove('ro-hover'));
+    });
+
     /* ============================================================
        13. 批发商详情：供货商品 + 最新报价
        ============================================================ */
@@ -3459,14 +3889,54 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         if (shopFormCard) shopFormCard.style.display = show ? 'none' : 'block';
     }
 
-    /* 按关键词渲染详情商品表（前端本地过滤 + 高亮） */
+    /* 详情表排序：取值规则与明细表一致，数值列按数字比、文字列按字典序、日期按字符串比 */
+    const toNum = (v) => parseFloat(String(v === undefined || v === null ? '' : v).replace(/[^\d.-]/g, '')) || 0;
+
+    function detailSortValue(p, key) {
+        switch (key) {
+            case 'name':  return (p.name || '') + ' ' + (p.spec || '');   /* 同名不同规格也能排开 */
+            case 'unit':  return p.unit || '';
+            case 'times': return toNum(p.times);
+            case 'qty':   return toNum(p.qty);
+            case 'price': return toNum(p.price);
+            case 'odate': return p.odate || '';                          /* YYYY-MM-DD，直接字符串比较 */
+            case 'range': return toNum(p.min);                           /* 区间按下限排 */
+            default:      return '';
+        }
+    }
+
+    function updateDetailSortIndicators() {
+        $$('#shopDetailCard th[data-sort]').forEach((th) => {
+            const label = th.dataset.label || headerLabel(th);
+            if (th.dataset.sort === detailSortKey) {
+                th.classList.add('sorted');
+                th.textContent = label + (detailSortDir === 'asc' ? ' ↑' : ' ↓');
+            } else {
+                th.classList.remove('sorted');
+                th.textContent = label;
+            }
+        });
+    }
+
+    /* 按关键词渲染详情商品表（前端本地过滤 + 高亮 + 排序） */
     function renderDetailTable() {
         if (!shopDetailBox) return;
 
         const kw  = detailKeyword ? detailKeyword.value.trim() : '';
         const low = kw.toLowerCase();
         const all = detailProducts;
-        const rows = low === '' ? all : all.filter((p) => p._blob.indexOf(low) !== -1);
+        let rows  = low === '' ? all.slice() : all.filter((p) => p._blob.indexOf(low) !== -1);
+
+        if (detailSortKey) {
+            const dir = detailSortDir === 'asc' ? 1 : -1;
+            const key = detailSortKey;
+            rows.sort((a, b) => {
+                const va = detailSortValue(a, key);
+                const vb = detailSortValue(b, key);
+                if (typeof va === 'number') return va === vb ? 0 : (va - vb) * dir;
+                return va === vb ? 0 : va.localeCompare(vb) * dir;
+            });
+        }
 
         if (detailCount) {
             detailCount.innerHTML = all.length === 0 ? ''
@@ -3476,11 +3946,9 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         }
 
         if (!rows.length) {
-            shopDetailBox.innerHTML = '<tr class="empty-row"><td colspan="8">'
-                + (all.length === 0
-                    ? '该批发商还没有进货记录，先在「录入进货单」里记一笔吧'
-                    : '没有匹配「' + esc(kw) + '」的商品')
-                + '</td></tr>';
+            shopDetailBox.innerHTML = emptyRow(8, all.length === 0
+                ? '该批发商还没有进货记录，先在「录入进货单」里记一笔吧'
+                : '没有匹配「' + esc(kw) + '」的商品');
             return;
         }
 
@@ -3488,12 +3956,14 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             const range = (p.min === p.max) ? ('￥' + esc(p.min)) : ('￥' + esc(p.min) + ' ~ ￥' + esc(p.max));
             return '<tr>'
                 + '<td class="idx-cell">' + (i + 1) + '</td>'
-                + '<td class="pd-name">' + hl(p.name, kw) + '</td>'
-                + '<td>' + (p.unit ? esc(p.unit) : '<span class="muted">—</span>') + '</td>'
+                + '<td class="pd-name">' + hl(p.name, kw)
+                    + (p.spec ? '<span class="sp">' + esc(p.spec) + '</span>' : '')
+                    + '</td>'
+                + '<td>' + orDash(p.unit) + '</td>'
                 + '<td class="num">' + p.times + '</td>'
                 + '<td class="num">' + esc(p.qty) + '</td>'
                 + '<td class="num detail-new-price">￥' + esc(p.price) + '</td>'
-                + '<td class="num">' + (p.odate ? esc(p.odate) : '<span class="muted">—</span>') + '</td>'
+                + '<td class="num">' + orDash(p.odate) + '</td>'
                 + '<td class="num">' + range + '</td>'
                 + '</tr>';
         }).join('');
@@ -3503,6 +3973,9 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         if (!shopDetailCard) return;
 
         detailProducts = [];
+        detailSortKey  = '';
+        detailSortDir  = 'desc';
+        updateDetailSortIndicators();
         if (detailKeyword) detailKeyword.value = '';
         if (clearDetailKw) clearDetailKw.style.display = 'none';
         if (detailCount)   detailCount.innerHTML = '';
@@ -3549,13 +4022,38 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             renderDetailTable();
         } catch (err) {
             shopDetailMeta.innerHTML = '<span class="dh-muted">加载失败：' + esc(err.message || '网络错误') + '</span>';
-            shopDetailBox.innerHTML  = '<tr class="empty-row"><td colspan="8">下拉详情失败，请返回重试</td></tr>';
+            shopDetailBox.innerHTML  = emptyRow(8, '下拉详情失败，请返回重试');
         }
     }
 
     on(shopDetailBack, 'click', () => {
         showShopDetail(false);
         scrollToPanel('shop');
+    });
+
+    /* 详情表表头排序：点 # 恢复默认顺序；文字列第一次从小到大，数值/日期列第一次从大到小 */
+    const DETAIL_TEXT_ASC = ['name', 'unit'];
+    on(panelDetailThead, 'click', (e) => {
+        const th = e.target.closest('th[data-sort]');
+        if (!th) return;
+        const key = th.dataset.sort;
+
+        if (key === 'index') {
+            detailSortKey = '';
+            detailSortDir = 'desc';
+            updateDetailSortIndicators();
+            renderDetailTable();
+            return;
+        }
+
+        if (detailSortKey === key) {
+            detailSortDir = detailSortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+            detailSortKey = key;
+            detailSortDir = DETAIL_TEXT_ASC.indexOf(key) >= 0 ? 'asc' : 'desc';
+        }
+        updateDetailSortIndicators();
+        renderDetailTable();
     });
 
     /* 详情内的商品搜索（本地过滤，不请求后端；命中处高亮） */
