@@ -89,6 +89,16 @@ function fmtNum($v): string {
     return $s === '' ? '0' : $s;
 }
 
+/* 单价最多 4 位小数、最少 2 位：整数价显示 45.60，除不尽的显示 2.0833。
+   和前端 formatPrice 保持同一口径，避免存 4 位、显示 4 位对不上 */
+function fmtPrice($v): string {
+    $s = rtrim(number_format(round((float)$v, 4), 4, '.', ''), '0');
+    $dot = strpos($s, '.');
+    $frac = $dot === false ? '' : substr($s, $dot + 1);
+    if (strlen($frac) < 2) $s .= str_repeat('0', 2 - strlen($frac));
+    return $s;
+}
+
 function jsonOut(array $data, int $code = 200): void {
     http_response_code($code);
     header('Content-Type: application/json; charset=utf-8');
@@ -435,7 +445,7 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
                     . '</td>'
                 . '<td>' . ($it['unit'] !== '' ? highlight($it['unit'], $q) : '—') . '</td>'
                 . '<td class="num">' . fmtNum($it['qty']) . '</td>'
-                . '<td class="num">￥' . number_format((float)$it['price'], 2) . '</td>'
+                . '<td class="num">￥' . fmtPrice($it['price']) . '</td>'
                 . '<td class="sub">￥' . number_format($sub, 2) . '</td>'
                 . '</tr>';
         }
@@ -550,9 +560,9 @@ if ($ajax !== '') {
                 'unit'  => $a['unit'],
                 'times' => (int)$a['times'],
                 'qty'   => fmtNum($a['qty']),
-                'price' => number_format($a['price'], 2),
-                'min'   => number_format($a['min'], 2),
-                'max'   => number_format($a['max'], 2),
+                'price' => fmtPrice($a['price']),
+                'min'   => fmtPrice($a['min']),
+                'max'   => fmtPrice($a['max']),
                 'odate' => $a['odate'],
             ];
         }
@@ -606,7 +616,7 @@ if ($ajax !== '') {
             $nm = trim((string)$r['name']);
             if ($nm === '') continue;
 
-            $price = number_format((float)$r['price'], 2, '.', '');
+            $price = fmtPrice($r['price']);
             $key = $nm . "\x1f" . $price;
             if (isset($seen[$key])) continue;   /* 同价只留最近一次 */
             $seen[$key] = 1;
@@ -754,7 +764,7 @@ if ($ajax !== '') {
             $detail[$nm] = [
                 'spec'  => (string)$r['spec'],
                 'unit'  => (string)$r['unit'],
-                'price' => number_format((float)$r['price'], 2, '.', ''),
+                'price' => fmtPrice($r['price']),
                 'odate' => (string)$r['odate'],
                 'wh'    => (string)$r['wholesaler'],
             ];
@@ -910,9 +920,10 @@ if ($ajax !== '') {
             $n = mb_substr(trim((string)($it['name'] ?? '')), 0, 120);
             if ($n === '') continue;
 
-            /* 数量/单价统一裁到 2 位小数并夹在合理区间，免得脏数据进库 */
+            /* 数量裁到 2 位小数，单价裁到 4 位（除不尽的单价，如 12.5÷6=2.0833），
+               否则两位单价乘回去还原不了实付总额 */
             $qty   = round((float)($it['qty'] ?? 0), 2);
-            $price = round((float)($it['price'] ?? 0), 2);
+            $price = round((float)($it['price'] ?? 0), 4);
             if (!is_finite($qty) || $qty < 0) $qty = 0;
             if (!is_finite($price) || $price < 0) $price = 0;
             if ($qty > 1000000) $qty = 1000000;
@@ -1150,6 +1161,12 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
 
 .items-table .i-qty,
 .items-table .i-price { text-align: right; }
+/* 小计框：既能看，也能手填总价，填了就反算单价 */
+.items-table .i-sub{
+    text-align:right;font-weight:600;color:var(--primary-strong);
+    font-variant-numeric:tabular-nums;
+}
+.th-small{font-size:11px;font-weight:400;color:#9aa7ba;margin-left:3px;}
 /* 单价框不要上下箭头，也不要滚轮/方向键改数：纯手输或点历史价 */
 .items-table .i-price{-moz-appearance:textfield;appearance:textfield;}
 .items-table .i-price::-webkit-outer-spin-button,
@@ -1850,7 +1867,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                                 <th style="width:110px">单位</th>
                                 <th style="width:130px;text-align:right">数量</th>
                                 <th style="width:150px;text-align:right">单价（元）</th>
-                                <th style="width:140px;text-align:right">小计</th>
+                                <th style="width:140px;text-align:right">小计<span class="th-small">可填</span></th>
                                 <th style="width:60px"></th>
                             </tr>
                         </thead>
@@ -2298,22 +2315,26 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         input.dataset.last = (now === null ? '' : String(now));
     }
 
-    /* 单价统一显示两位小数：载入已有单、失焦、回车、选历史价后都规整成 45.60 这种写法 */
+    /* 单价最多 4 位小数、最少 2 位：45.60 这种整数价显示两位，
+       12.5÷6=2.0833 这类除不尽的价保留四位，小计才能对上实付总额 */
     function formatPrice(input) {
         if (!input) return;
         const v = parseFloat(input.value);
-        /* 只保留两位小数，多出来的直接截掉（不四舍五入，避免和手输数字对不上） */
-        const fixed = (isFinite(v) && v >= 0) ? (Math.floor((v + 1e-9) * 100) / 100).toFixed(2) : '0.00';
+        let fixed = '0.00';
+        if (isFinite(v) && v >= 0) {
+            /* 四舍五入到 4 位，再把第三、四位上的多余零去掉（2.0800 → 2.08，2.0830 → 2.083） */
+            fixed = (Math.round((v + 1e-9) * 10000) / 10000).toFixed(4).replace(/(\.\d{2})0+$/, '$1');
+        }
         if (input.value !== fixed) input.value = fixed;
     }
 
-    /* 单价框只接受「数字 + 一个小数点」，其余字符边打边清掉 */
+    /* 单价框只接受「数字 + 一个小数点」，小数最多 4 位，其余字符边打边清掉 */
     function sanitizePrice(input) {
         if (!input) return;
         const raw = input.value;
         let s = raw.replace(/[^\d.]/g, '');
         const dot = s.indexOf('.');
-        if (dot >= 0) s = s.slice(0, dot + 1) + s.slice(dot + 1).replace(/\./g, '');
+        if (dot >= 0) s = s.slice(0, dot + 1) + s.slice(dot + 1).replace(/\./g, '').slice(0, 4);
         if (s !== raw) input.value = s;
     }
 
@@ -2788,7 +2809,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             + '<td><input class="i-unit" placeholder="箱 / 个"></td>'
             + '<td><input class="i-qty" type="number" step="1" min="0" data-prec="0" data-last="1" value="1"></td>'
             + '<td><input class="i-price" type="text" inputmode="decimal" value="0.00" autocomplete="off" placeholder="0.00"></td>'
-            + '<td class="subtotal">￥0.00</td>'
+            + '<td><input class="i-sub" type="text" inputmode="decimal" value="0.00" autocomplete="off" placeholder="或填总价"></td>'
             + '<td><button type="button" class="row-del" title="删除此行">×</button></td>'
             + '</tr>';
     }
@@ -2834,16 +2855,56 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         const pEl = cellInput(tr, CELL_PRICE);
         const q = qEl ? (parseFloat(qEl.value) || 0) : 0;
         const p = pEl ? (parseFloat(pEl.value) || 0) : 0;
-        return { q: q, p: p, sub: q * p };
+        let sub = q * p;
+        /* 小计被手填成总价、还没失焦反算单价时，先用这个金额参与合计，
+           否则底部合计会滞后一拍 */
+        const sEl = tr.querySelector('.i-sub');
+        if (tr.dataset.amt === '1' && sEl) {
+            const a = parseFloat(sEl.value);
+            if (isFinite(a) && a >= 0) sub = a;
+        }
+        return { q: q, p: p, sub: sub };
     }
 
-    /* 只重算这一行的小计（敲字时立刻看到变化） */
+    /* 只重算这一行的小计（敲字时立刻看到变化）；正在编辑小计框时不回写，免得打字被打断 */
     function recalcRow(tr) {
         if (!tr) return 0;
         const v = rowCalc(tr);
-        const cell = (tr.cells && tr.cells[CELL_SUB]) || tr.querySelector('.subtotal');
-        if (cell) cell.textContent = '￥' + v.sub.toFixed(2);
+        const sEl = tr.querySelector('.i-sub');
+        if (sEl && document.activeElement !== sEl) sEl.value = v.sub.toFixed(2);
         return v.sub;
+    }
+
+    /* 把小计框里手填的总价折算回单价（4 位小数），之后仍走「数量 × 单价」的常规口径 */
+    function settleAmountRow(tr) {
+        if (!tr) return;
+        const sEl = tr.querySelector('.i-sub');
+        if (!sEl) return;
+        const qEl = cellInput(tr, CELL_QTY);
+        const pEl = cellInput(tr, CELL_PRICE);
+        const q  = qEl ? (parseFloat(qEl.value) || 0) : 0;
+        const amount = parseFloat(sEl.value);
+
+        if (!isFinite(amount) || amount < 0) {
+            delete tr.dataset.amt;
+            recalcRow(tr);
+            return;
+        }
+        if (q <= 0) {
+            /* 没数量就没法反算单价，退回自动值，并提示先填数量 */
+            delete tr.dataset.amt;
+            recalcRow(tr);
+            toast('先填数量，才能按总价反算单价', 'error');
+            return;
+        }
+        const price = Math.round((amount / q) * 10000) / 10000;
+        if (pEl) {
+            pEl.value = String(price);
+            formatPrice(pEl);
+        }
+        delete tr.dataset.amt;
+        hidePriceTip();
+        recalcRow(tr);
     }
 
     /* 合计：数值都从内存里算，不再为了求和去查一遍 DOM */
@@ -2885,8 +2946,24 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             return;
         }
 
+        /* 小计框：直接填这一行的实付总价，失焦时反算单价；敲字期间合计先按手填金额走 */
+        if (t.classList.contains('i-sub')) {
+            const tr = t.closest('tr');
+            let s = t.value.replace(/[^\d.]/g, '');
+            const dot = s.indexOf('.');
+            if (dot >= 0) s = s.slice(0, dot + 1) + s.slice(dot + 1).replace(/\./g, '').slice(0, 2);
+            if (s !== t.value) t.value = s;
+            if (tr) tr.dataset.amt = '1';
+            recalcRow(tr);                 /* 焦点在这一格，内部不会回写它的值 */
+            recalcTotals();
+            return;
+        }
+
         /* 名称/单位不影响金额，敲字时不必重算整张表 */
         if (!t.classList.contains('i-qty') && !t.classList.contains('i-price')) return;
+        const tr = t.closest('tr');
+        /* 动了数量或单价，之前手填的总价就作废，回到「数量 × 单价」口径 */
+        if (tr) delete tr.dataset.amt;
         if (t.classList.contains('i-qty')) {
             syncQtyStep(t);
         } else {
@@ -2894,7 +2971,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             hidePriceTip();        /* 手打了单价就不用再提示了 */
         }
         /* 只刷这一行的小计 + 底部合计：行数多时也不卡 */
-        recalcRow(t.closest('tr'));
+        recalcRow(tr);
         recalcTotals();
     });
 
@@ -2923,7 +3000,13 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         /* 商品名定格（Tab / 回车 / 失焦）→ 立刻把规格候选准备好 */
         if (t.classList.contains('i-name')) ensureSpecOptions(t.closest('tr'));
         if (t.classList.contains('i-qty')) syncQtyStep(t);
-        /* 单价：失焦统一成两位小数；负数归零并刷新小计 */
+        /* 小计填完总价 → 按数量反算单价，之后仍按「数量 × 单价」口径落库 */
+        if (t.classList.contains('i-sub')) {
+            settleAmountRow(t.closest('tr'));
+            recalcTotals();
+            return;
+        }
+        /* 单价：失焦规整成 2~4 位小数；负数归零并刷新小计 */
         if (t.classList.contains('i-price')) {
             if (parseFloat(t.value) < 0) {
                 t.value = '0';
@@ -3129,6 +3212,11 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
        ============================================================ */
     on(form, 'submit', async (e) => {
         e.preventDefault();
+
+        /* 填了总价但还没失焦就点保存：先把这些行折算成单价，避免提交旧的单价 */
+        for (const tr of (itemsBody ? itemsBody.rows : [])) {
+            if (tr.dataset.amt === '1') settleAmountRow(tr);
+        }
 
         const items = [];
         for (const tr of (itemsBody ? itemsBody.rows : [])) {
