@@ -286,13 +286,13 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
     $cond   = [];
     $params = [];
 
-    /* 搜索：关键词（商品 / 批发商 / 备注 / 单位） */
+    /* 搜索：关键词（商品名 / 规格 / 单位 / 批发商 / 备注） */
     if ($q !== '') {
         $like = '%' . $q . '%';
         $cond[] = "(b.wholesaler LIKE :q1 OR b.note LIKE :q2
                     OR EXISTS (SELECT 1 FROM items i WHERE i.batch_id = b.id
-                               AND (i.name LIKE :q3 OR i.unit LIKE :q4)))";
-        $params += [':q1'=>$like, ':q2'=>$like, ':q3'=>$like, ':q4'=>$like];
+                               AND (i.name LIKE :q3 OR i.spec LIKE :q4 OR i.unit LIKE :q5)))";
+        $params += [':q1'=>$like, ':q2'=>$like, ':q3'=>$like, ':q4'=>$like, ':q5'=>$like];
     }
 
     /* 筛选：日期 */
@@ -385,7 +385,7 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
                 . '<td class="idx-cell">' . ($idx + 1) . '</td>'
                 . '<td class="name-cell" data-v="' . h($it['name']) . '">' . highlight($it['name'], $q)
                     . ((string)($it['spec'] ?? '') !== ''
-                        ? '<span class="sp">' . h($it['spec']) . '</span>'
+                        ? '<span class="sp">' . highlight($it['spec'], $q) . '</span>'
                         : '')
                     . '</td>'
                 . '<td>' . ($it['unit'] !== '' ? highlight($it['unit'], $q) : '—') . '</td>'
