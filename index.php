@@ -1094,6 +1094,8 @@ h1{
 }
 /* 卡片之间的间距用「相邻卡」控制，最后一张卡不叠 margin，页面底部留白只由 body padding 决定 */
 .tab-panel .card + .card{margin-top:16px;}
+/* 详情卡是「顶替」列表卡出现的，前面两张卡都 display:none，相邻卡间距不该再叠一次 */
+#shopDetailCard{margin-top:0;}
 .card h2{
     margin:0 0 16px;font-size:16px;font-weight:700;letter-spacing:.3px;display:flex;align-items:center;gap:8px;
 }
@@ -1294,25 +1296,19 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
 }
 .list-tip svg{color:#b9c6da;flex:none;}
 
-/* 批发商详情头部：联系人/电话一行、备注独占一行、统计两列 */
+/* 批发商详情头部：两列网格，标签在左、值在右，三行竖排；
+   标签列宽由最长标签决定，所有值自然对齐；统计单独一行，虚线隔开 */
 .detail-head{
-    display:flex;flex-direction:column;gap:6px;
-    padding:12px 16px;margin:0 0 14px;font-size:13px;color:#54637a;
-    background:linear-gradient(180deg,#f9fbff,#f6f9fe);border:1px solid var(--line-card);border-radius:12px;
+    display:grid;grid-template-columns:max-content minmax(0,1fr);
+    align-items:baseline;gap:10px 16px;padding:15px 18px;margin:0 0 14px;font-size:13px;
+    background:linear-gradient(180deg,#fafcff,#f4f8fe);border:1px solid var(--line-card);border-radius:12px;
 }
-.detail-head .dh-row{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 26px;line-height:1.65;}
-.detail-head .dh-note{align-items:flex-start;}
-.detail-head .dh-note .dh-item{white-space:normal;word-break:break-word;}
-.detail-head .dh-stats{
-    display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 26px;
-    margin-top:8px;padding-top:9px;border-top:1px dashed #e4ecf8;
-}
-/* 标签列：固定 4 个汉字宽、右对齐，后面的中文冒号就自然成一条竖线 */
-.detail-head .dh-lb{display:inline-block;min-width:4em;text-align:right;color:#6c7d95;}
-.detail-head .dh-col{color:#94a3b8;padding-right:2px;}
-.detail-head .dh-item{white-space:nowrap;}
-.detail-head .dh-item b{font-weight:600;color:var(--text);}
-.detail-head .dh-money b{color:var(--primary-strong);font-variant-numeric:tabular-nums;}
+.detail-head em{font-style:normal;font-size:12px;color:#93a1b5;white-space:nowrap;}
+.detail-head b{min-width:0;font-weight:600;color:#22314a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;}
+.detail-head .dh-note{font-weight:500;color:#3d4f68;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+.detail-head .dh-stats{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 24px;padding-top:12px;border-top:1px dashed #e4ecf8;}
+.detail-head .dh-stats span{display:inline-flex;align-items:baseline;gap:6px;}
+.detail-head .dh-money b{color:var(--primary-strong);}
 .detail-head .dh-muted{color:var(--muted-light);font-weight:400;}
 .data-table .detail-new-price{font-weight:700;color:var(--primary-strong);font-variant-numeric:tabular-nums;}
 .data-table .pd-name{font-weight:600;color:#22314a;white-space:nowrap;min-width:160px;}
@@ -1322,13 +1318,14 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
     font-size:10.5px;font-weight:400;line-height:0.8;color:#9aa7ba;letter-spacing:.2px;
 }
 
-/* 批发商详情：商品搜索条 */
+/* 批发商详情：商品搜索条（计数缩进对齐标题文字，标题前有 4px 竖条 + 8px 间距；
+   缩进只给计数，搜索框仍贴齐卡片内边距，手机端才不会左右不等宽） */
 .detail-bar{
     display:flex;align-items:center;justify-content:space-between;gap:10px 14px;
     flex-wrap:wrap;margin:0 0 12px;
 }
 .detail-bar .search-input-wrap input{width:260px;padding:9px 32px 9px 13px;}
-.detail-count{font-size:12.5px;color:var(--muted);white-space:nowrap;}
+.detail-count{font-size:12.5px;color:var(--muted);white-space:nowrap;margin-left:12px;}
 .detail-count b{color:var(--primary-strong);font-variant-numeric:tabular-nums;font-weight:600;}
 
 .clear-btn {
@@ -1527,8 +1524,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     .search{width:100%;}
     .detail-bar{width:100%;}
     .detail-bar .search-input-wrap input{width:100%;}
-    .detail-head .dh-stats{grid-template-columns:1fr;}
-    .detail-head .dh-row{gap:4px 16px;}
+    .detail-head{padding:12px 14px;gap:9px 12px;}
+    .detail-head .dh-stats{gap:6px 16px;}
     .filter-line{width:100%;}
     .filter-select{width:100%;}
     .filter-item{flex:1 1 100%;}
@@ -1728,8 +1725,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                     </div>
                 </div>
 
-                <div class="form-footer">
-                    <div class="total-box" id="shopSummary">统计中…</div>
+                <div class="form-footer" style="justify-content:flex-end">
                     <div class="actions">
                         <button type="button" class="btn btn-ghost" id="shopCancelBtn" style="display:none">取消编辑</button>
                         <button type="submit" class="btn btn-primary" id="shopSaveBtn">保存批发商</button>
@@ -1740,7 +1736,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 
         <section class="card" id="shopListCard">
             <div class="table-head">
-                <h2>批发商列表</h2>
+                <h2>批发商列表<span class="sd-sub" id="shopCount"></span></h2>
                 <div class="search">
                     <div class="search-input-wrap">
                         <input id="shopKeyword" placeholder="搜索名称 / 联系人 / 电话" autocomplete="off">
@@ -3640,7 +3636,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     const shopSaveBtn   = $('shopSaveBtn');
     const shopCancelBtn = $('shopCancelBtn');
     const shopFormTitle = $('shopFormTitle');
-    const shopSummary   = $('shopSummary');
+    const shopCount     = $('shopCount');
     const shopKeyword   = $('shopKeyword');
     const clearShopKw   = $('clearShopKeyword');
     const shopFormCard  = $('shopFormCard');
@@ -3680,6 +3676,9 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             ? shopData.filter((w) => w._blob.indexOf(kw) >= 0)
             : shopData.slice();
 
+        if (shopCount) {
+            shopCount.textContent = (kw ? '匹配 ' : '共 ') + rows.length + ' 家';
+        }
 
         if (!rows.length) {
             shopBox.innerHTML = emptyRow(5, kw ? '没有匹配的批发商' : '暂无批发商，先在上方新增一个吧');
@@ -3729,13 +3728,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             renderShopTable();
             renderShopOptions();
             renderChips();      /* 改名/删档后，筛选标签上的名字也要跟着更新 */
-
-            if (shopSummary) {
-                shopSummary.textContent = '共 ' + d.count + ' 家批发商 · 关联进货单 '
-                    + d.total_orders + ' 单 · 累计金额 ￥' + d.total_amount;
-            }
         } catch (err) {
-            if (shopSummary) shopSummary.textContent = '批发商数据加载失败';
+            if (shopCount) shopCount.textContent = '加载失败';
         }
     }
 
@@ -3953,29 +3947,21 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             if (!d.ok) throw new Error(d.msg || '加载失败');
 
             const w = d.wholesaler || {};
-            /* 批发商名字已经在上面的小标题里，这里不再重复；
-               联系人/电话一行，备注独占一行（备注可能很长），统计两列两行；
-               标签（联系人/电话/备注…）用等宽右对齐的标签列，中文冒号自然对齐；
-               没填的字段仍旧显示「—」 */
+            /* 标签 / 值成对铺进网格；备注的值跨列、最多两行；多个电话用间隔号连成一行 */
             const dash = '<b class="dh-muted">—</b>';
-            const lb = (t) => '<span class="dh-lb">' + t + '</span><span class="dh-col">：</span>';
-            const val = (v) => (v ? '<b>' + esc(v) + '</b>' : dash);
-            const parts = [
-                '<div class="dh-row">'
-                    + '<span class="dh-item">' + lb('联系人') + val(w.contact) + '</span>'
-                    + '<span class="dh-item">' + lb('电话')   + val(w.phone)   + '</span>'
-                + '</div>',
-                '<div class="dh-row dh-note">'
-                    + '<span class="dh-item">' + lb('备注') + val(w.note) + '</span>'
-                + '</div>',
-                '<div class="dh-stats">'
-                    + '<span class="dh-item">' + lb('进货单')   + '<b>' + d.orders + '</b> 单</span>'
-                    + '<span class="dh-item dh-money">' + lb('累计金额') + '<b>￥' + esc(d.total_amount) + '</b></span>'
-                    + '<span class="dh-item">' + lb('商品种类') + '<b>' + d.sku_count + '</b> 种</span>'
-                    + '<span class="dh-item">' + lb('累计数量') + '<b>' + esc(d.total_qty) + '</b></span>'
-                + '</div>'
-            ];
-            shopDetailMeta.innerHTML = parts.join('');
+            const cell = (k, v, cls) => '<em>' + k + '</em>'
+                + (v ? '<b' + (cls ? ' class="' + cls + '"' : '') + '>' + esc(v) + '</b>' : dash);
+            const stat = (k, v, cls) => '<span' + (cls ? ' class="' + cls + '"' : '') + '><em>' + k + '</em><b>' + v + '</b></span>';
+            const phones = (w.phone || '').split(/[,，、;；/]+/).map((s) => s.trim()).filter(Boolean).join(' · ');
+            shopDetailMeta.innerHTML =
+                cell('联系人', w.contact) + cell('电话', phones)
+                + cell('备注', w.note, 'dh-note')
+                + '<span class="dh-stats">'
+                    + stat('进货', d.orders + ' 单')
+                    + stat('商品', d.sku_count + ' 种')
+                    + stat('数量', d.total_qty)
+                    + stat('累计', '￥' + d.total_amount, 'dh-money')
+                + '</span>';
 
             /* 预先把商品名称拼成小写索引，输入时只做 indexOf（单位不参与搜索） */
             detailProducts = (d.products || []).map((p) => Object.assign({}, p, {
