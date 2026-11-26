@@ -2530,8 +2530,12 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         const up = pct > 0;
         el.textContent = (up ? '↑' : '↓') + Math.abs(pct).toFixed(1) + '%';
         el.classList.add(up ? 'up' : 'down');
-        el.title = '上次 ' + fmtPriceText(bp) + '（' + (base.odate || '—')
-                 + (base.unit ? '，' + base.unit : '') + '），共 ' + list.length + ' 次记录；点一下看全部历史价';
+        const diff = cur - bp;
+        el.title = '上次 ' + fmtPriceText(bp) + ' 元' + (base.unit ? '/' + base.unit : '')
+                 + '（' + (base.odate || '日期不明') + '）'
+                 + '，这次' + (up ? '涨 ' : '降 ') + fmtPriceText(Math.abs(diff)) + ' 元'
+                 + '（' + (up ? '+' : '-') + Math.abs(pct).toFixed(1) + '%）'
+                 + '；点一下看全部历史价';
         el.hidden = false;
     }
 
