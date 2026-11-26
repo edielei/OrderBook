@@ -1927,7 +1927,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                         <div class="flag-row">
                             <button type="button" class="flag-toggle" id="f-flag" data-on="0" aria-pressed="false" title="点击切换是否标记存疑">
                                 <svg class="flag-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect class="flag-box" x="3.5" y="3.5" width="17" height="17" rx="4"></rect><path class="flag-tick" d="M8 12.2l2.6 2.6 5.4-5.6"></path></svg>
-                                <span class="flag-toggle-text">标记存疑</span>
+                                <span class="flag-toggle-text">未标记</span>
                             </button>
                             <em class="flag-hint">数据存疑时点一下，原因写备注</em>
                         </div>
@@ -2305,8 +2305,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         fFlag.classList.toggle('is-on', isOn);
         fFlag.setAttribute('aria-pressed', isOn ? 'true' : 'false');
         const txt = fFlag.querySelector('.flag-toggle-text');
-        if (txt) txt.textContent = isOn ? '取消标记' : '标记存疑';
-        fFlag.title = isOn ? '当前：已标记存疑，点击取消标记' : '当前：未标记，点击标记存疑';
+        if (txt) txt.textContent = isOn ? '已标记' : '未标记';
+        fFlag.title = isOn ? '当前：已标记存疑，点击取消' : '当前：未标记，点击标记存疑';
     }
     if (fFlag) fFlag.addEventListener('click', () => setFlagOn(fFlag.dataset.on !== '1'));
     const itemsBody    = $('itemsBody');
