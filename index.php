@@ -1138,23 +1138,21 @@ h1{
 /* 累计单数卡右侧的「存疑」小块：点一下切换只看存疑 */
 .stat-flagbox{
     margin-left:auto; flex:0 0 auto;
-    display:inline-flex; align-items:center; gap:6px;
-    height:28px; padding:0 12px;
-    border-radius:999px; border:1px solid #e5eaf3; background:#f8fafd;
-    color:#7d8899; font-size:12.5px; font-weight:600; letter-spacing:.2px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:5px 11px; border-radius:10px;
+    border:1px solid #fbe8c6; background:#fffaf0;
     cursor:pointer; user-select:none;
     transition:background .15s, border-color .15s, color .15s;
 }
-.stat-flagbox .flagbox-dot{width:6px; height:6px; border-radius:50%; background:#c5cddb; flex:none; transition:background .15s;}
-.stat-flagbox .flagbox-label{line-height:1;}
-.stat-flagbox .flagbox-num{font-size:13px; font-weight:800; color:#5a6473; font-variant-numeric:tabular-nums; line-height:1;}
-.stat-flagbox:hover{background:#eff3fa; border-color:#d8e0ec; color:#5a6473;}
-.stat-flagbox:focus-visible{outline:2px solid #c7d5f8; outline-offset:2px;}
-/* 已勾选「只看存疑」：琥珀选中态 */
-.stat-flagbox.is-on{background:#fff4e2; border-color:#efcb91; color:#b87a1a;}
-.stat-flagbox.is-on .flagbox-dot{background:#e39d2c;}
-.stat-flagbox.is-on .flagbox-num{color:#b0700c;}
-.stat-flagbox.is-on:hover{background:#ffeccd;}
+.stat-flagbox .flagbox-num{font-size:19px; font-weight:800; line-height:1.15; letter-spacing:-.3px; color:#9a6108;}
+.stat-flagbox .flagbox-label{font-size:11px; font-weight:600; letter-spacing:.5px; color:#a97c3c;}
+.stat-flagbox:hover{background:#fff4e0; border-color:#f9dbaa;}
+.stat-flagbox:focus-visible{outline:2px solid #f6d7a0; outline-offset:2px;}
+/* 已勾选「只看存疑」：实心琥珀选中态 */
+.stat-flagbox.is-on{background:#ffe9c2; border-color:#f0bf6a;}
+.stat-flagbox.is-on .flagbox-num{color:#7d4c02;}
+.stat-flagbox.is-on .flagbox-label{color:#8a5300;}
+.stat-flagbox.is-on:hover{background:#ffe2b0;}
 
 /* ---------- 卡片 ---------- */
 .card{
@@ -1724,9 +1722,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                     <strong class="stat-value"><span id="stat-count"><?= $stats['total_count'] ?></span><span class="unit">单</span></strong>
                 </div>
                 <div class="stat-flagbox<?= (int)$stats['flagged_count'] > 0 ? '' : ' is-zero' ?>" id="statFlagBox" tabindex="0" role="button" title="数据存疑，待核对｜点击只看存疑" style="<?= (int)$stats['flagged_count'] > 0 ? '' : 'display:none' ?>">
-                    <i class="flagbox-dot"></i>
-                    <span class="flagbox-label">存疑</span>
                     <span class="flagbox-num" id="stat-flagged"><?= (int)$stats['flagged_count'] ?></span>
+                    <span class="flagbox-label">存疑</span>
                 </div>
             </div>
             <div class="stat">
