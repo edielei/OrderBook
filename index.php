@@ -3259,9 +3259,10 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 
         try {
             const editing = !!batchIdEl.value;
+            const saveWholesaler = fWholesaler.value.trim();
             await callAPI('?ajax=save', {
                 id:         editing ? parseInt(batchIdEl.value, 10) : 0,
-                wholesaler: fWholesaler.value.trim(),
+                wholesaler: saveWholesaler,
                 odate:      dateRes.iso,
                 note:       fNote.value.trim(),
                 items:      items
@@ -3274,8 +3275,14 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             resetForm();
 
             if (!editing) currentPage = 1;
-            /* 三个请求互不依赖，并发发出，省掉一次串行往返；新出现的批发商也在里面同步 */
-            await Promise.all([refreshList(currentPage), refreshStats(), loadWholesalers()]);
+            /* 三个请求互不依赖，并发发出，省掉一次串行往返；新出现的批发商也在里面同步。
+               单据一变，若「供货商品与最新报价」正开着同一家，也顺手把它刷成最新 */
+            await Promise.all([
+                refreshList(currentPage),
+                refreshStats(),
+                loadWholesalers(),
+                detailShopName === saveWholesaler ? refreshDetailIfOpen() : Promise.resolve()
+            ]);
             switchTab('list');
         } catch (err) {
             toast(err.message || '网络错误，请重试', 'error');
@@ -3704,8 +3711,9 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             priceHistory.clear();      /* 历史单价可能因此变化，清缓存 */
             nameCache.clear();         /* 商品名联想同理 */
             whIndex.clear();           /* 种类数变了，重新摸一遍 */
-            /* 批发商那栏的单数/累计金额也跟着变了，必须一起刷新，否则一直显示旧数字 */
-            await Promise.all([refreshList(currentPage), refreshStats(), loadWholesalers()]);
+            /* 批发商那栏的单数/累计金额也跟着变了，必须一起刷新，否则一直显示旧数字；
+               删掉的可能正是详情里那家的单据，详情也一并重拉 */
+            await Promise.all([refreshList(currentPage), refreshStats(), loadWholesalers(), refreshDetailIfOpen()]);
         } catch (err) {
             toast(err.message || '删除失败', 'error');
         }
@@ -3743,6 +3751,10 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     let detailProducts = [];
     let detailSortKey = '';
     let detailSortDir = 'desc';
+    /* 当前详情页对应的是哪家批发商：录单 / 改单 / 改档 / 删单之后，
+       要据此把「供货商品与最新报价」就地刷成最新，而不是等用户退出去再点一次 */
+    let detailShopId   = 0;
+    let detailShopName = '';
 
     /* 把搜索用的小写索引预先算一次，输入时不再逐行拼字符串；
        列表只展示名称 / 联系人 / 联系电话，所以备注不参与匹配——否则搜只命中备注的词，
@@ -3858,10 +3870,16 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                 note:    sNote.value.trim()
             });
 
+            const editedId = editing ? parseInt(shopIdEl.value, 10) : 0;
             toast(editing ? '修改已保存' : '新增成功', 'ok');
             resetShopForm();
             /* 改名会同步历史进货单，所以列表也跟着刷；两个请求并发 */
             await Promise.all([loadWholesalers(), refreshList(currentPage)]);
+            /* 改的正好是当前打开的详情：标题里的名字、联系人、电话、备注立刻跟着变 */
+            if (editedId && detailShopId === editedId) {
+                detailShopName = name;
+                refreshDetailIfOpen();
+            }
         } catch (err) {
             toast(err.message || '网络错误，请重试', 'error');
         } finally {
@@ -3901,9 +3919,16 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             if (!confirm(tip)) return;
 
             try {
-                await callAPI('?ajax=wdelete', { id: parseInt(delBtn.dataset.id, 10) });
+                const deletedId = parseInt(delBtn.dataset.id, 10);
+                await callAPI('?ajax=wdelete', { id: deletedId });
                 toast('已删除', 'ok');
                 if (shopIdEl.value === delBtn.dataset.id) resetShopForm();
+                /* 删掉的正是当前打开的详情：没有这家了，退回列表，别留一张查不到的旧表 */
+                if (detailShopId === deletedId) {
+                    detailShopId = 0;
+                    detailShopName = '';
+                    showShopDetail(false);
+                }
                 /* 下拉框少了一项，若正好是当前筛选值，列表要跟着变，标签也要同步 */
                 const gone = w ? w.name : '';
                 if (gone && shopFilter && shopFilter.value === gone) shopFilter.value = '';
@@ -4011,24 +4036,30 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         }).join('');
     }
 
-    async function openShopDetail(id, name) {
+    async function openShopDetail(id, name, silent) {
         if (!shopDetailCard) return;
 
-        detailProducts = [];
-        detailSortKey  = '';
-        detailSortDir  = 'desc';
-        updateDetailSortIndicators();
-        if (detailKeyword) detailKeyword.value = '';
-        if (clearDetailKw) clearDetailKw.style.display = 'none';
-        if (detailCount)   detailCount.innerHTML = '';
+        detailShopId   = parseInt(id, 10) || 0;
+        detailShopName = name || '';
 
-        /* 标题里批发商名是主角（放大加粗），「供货商品与最新报价」只是灰色小字说明 */
-        shopDetailTitle.innerHTML = '<span class="sd-name">' + esc(name || '批发商') + '</span>'
-            + '<span class="sd-sub">供货商品与最新报价</span>';
-        shopDetailMeta.innerHTML = '<span class="dh-muted">加载中…</span>';
-        shopDetailBox.innerHTML  = '';
-        showShopDetail(true);
-        scrollToPanel('shop');
+        /* silent：数据变动后原地刷新，保留用户挑的排序、填的搜索词，也不跳转滚动 */
+        if (!silent) {
+            detailProducts = [];
+            detailSortKey  = '';
+            detailSortDir  = 'desc';
+            updateDetailSortIndicators();
+            if (detailKeyword) detailKeyword.value = '';
+            if (clearDetailKw) clearDetailKw.style.display = 'none';
+            if (detailCount)   detailCount.innerHTML = '';
+
+            /* 标题里批发商名是主角（放大加粗），「供货商品与最新报价」只是灰色小字说明 */
+            shopDetailTitle.innerHTML = '<span class="sd-name">' + esc(name || '批发商') + '</span>'
+                + '<span class="sd-sub">供货商品与最新报价</span>';
+            shopDetailMeta.innerHTML = '<span class="dh-muted">加载中…</span>';
+            shopDetailBox.innerHTML  = '';
+            showShopDetail(true);
+            scrollToPanel('shop');
+        }
 
         try {
             const d = await getJSON('?ajax=whdetail&id=' + encodeURIComponent(id));
@@ -4057,9 +4088,20 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             }));
             renderDetailTable();
         } catch (err) {
+            if (silent) {   /* 静默刷新失败：保留原表，只在标题下方提示一次，不把已有数据清空 */
+                shopDetailMeta.innerHTML = '<span class="dh-muted">刷新失败：' + esc(err.message || '网络错误') + '</span>';
+                return;
+            }
             shopDetailMeta.innerHTML = '<span class="dh-muted">加载失败：' + esc(err.message || '网络错误') + '</span>';
             shopDetailBox.innerHTML  = emptyRow(8, '下拉详情失败，请返回重试');
         }
+    }
+
+    /* 详情页正在看时，数据一变就把它重新拉一遍；没打开则什么也不做 */
+    function refreshDetailIfOpen() {
+        if (!shopDetailCard || !detailShopId) return Promise.resolve();
+        if (shopDetailCard.style.display === 'none') return Promise.resolve();
+        return openShopDetail(detailShopId, detailShopName, true);
     }
 
     on(shopDetailBack, 'click', () => {
