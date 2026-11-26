@@ -1101,10 +1101,14 @@ h1{
 .stat:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(35,60,110,0.06); border-color: #dbe4f3; }
 .stat-icon { width: 44px; height: 44px; flex:none; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
 .stat-icon svg { width: 22px; height: 22px; }
-.icon-blue { background: #eff4ff; color: var(--primary); }
-.icon-purple { background: #f5f0ff; color: #8a6cf5; }
-.icon-green { background: #eefbf4; color: #1f8a4c; }
-.icon-teal { background: #e7f4fa; color: #0e7490; }
+/* 四张统计卡的图标配色：按内容含义分两族
+   ——「累计」= 沉淀下来的总量，用冷蓝、浓紫（记录 / 资产）
+   ——「本月」= 当月正在发生的，用翠绿、天青（当月 / 账单流水）
+   金色留给「存疑」徽章，避免和它撞色（金色在账本里也容易被读成提示色） */
+.icon-blue   { background: #eaf1fe; color: #2f66e8; }
+.icon-purple { background: #f4efff; color: #7c3aed; }
+.icon-green  { background: #e9faf1; color: #168f4c; }
+.icon-teal   { background: #e6f5fb; color: #0b7fa5; }
 .stat-content { display: flex; flex-direction: column; justify-content: center; }
 .stat-label { font-size: 13px; color: var(--muted); font-weight: 500; margin-bottom: 2px; letter-spacing: 0.5px; }
 .stat-value { font-size: 22px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.2; }
