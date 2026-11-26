@@ -1551,26 +1551,28 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 #printArea .print-header h2 { font-size: 24px; margin: 0; letter-spacing: 4px; }
 #printArea .print-meta { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 14px; border-bottom: 1px solid #000; padding-bottom: 6px; }
 #printArea .print-meta div { line-height: 1.8; }
-/* 固定列宽：总宽精确等于内容宽，右边框不会被挤到页面外，也不会被裁成半像素 */
-#printArea .print-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 13px; table-layout: fixed; border: 1px solid #000; }
+/* 列宽按内容自适应：只有商品名称列吃掉剩余宽度，其余列各自按表头/内容的最宽值收紧，
+   数字列不换行，金额再长也能整格显示 */
+#printArea .print-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 13px; table-layout: auto; border: 1px solid #000; }
 #printArea .print-table th,
-#printArea .print-table td { border: 1px solid #000; padding: 7px 10px; text-align: left; white-space: nowrap; overflow: hidden; }
+#printArea .print-table td { border: 1px solid #000; padding: 7px 10px; text-align: left; white-space: nowrap; }
 /* 行不要跨页断开，避免最后一行被硬拆到第二页 */
 #printArea .print-table tr { page-break-inside: avoid; break-inside: avoid; }
+/* width:1% 是表格布局里的「尽量窄」写法：该列缩到内容宽，剩下的宽度留给商品名称列 */
 #printArea .print-table th:nth-child(1),
-#printArea .print-table td:nth-child(1) { width: 34px; }
-/* 其余列按内容自适应，商品名称列吃掉剩余宽度（不参与自适应，避免把数字列撑宽/挤窄） */
+#printArea .print-table td:nth-child(1) { width: 1%; }
+/* 商品名称列吃掉剩余宽度；给个下限，长商品名也不会把数字列挤成竖排 */
 #printArea .print-table th:nth-child(2),
-#printArea .print-table td:nth-child(2) { white-space: normal; word-break: break-word; }
+#printArea .print-table td:nth-child(2) { width: 100%; min-width: 38%; white-space: normal; word-break: break-word; }
 /* 单位列内容短，居中更整齐 */
 #printArea .print-table th:nth-child(3),
-#printArea .print-table td:nth-child(3) { width: 54px; text-align: center; }
+#printArea .print-table td:nth-child(3) { width: 1%; text-align: center; }
 #printArea .print-table th:nth-child(4),
-#printArea .print-table td:nth-child(4) { width: 62px; }
+#printArea .print-table td:nth-child(4) { width: 1%; }
 #printArea .print-table th:nth-child(5),
-#printArea .print-table td:nth-child(5) { width: 76px; }
+#printArea .print-table td:nth-child(5) { width: 1%; }
 #printArea .print-table th:nth-child(6),
-#printArea .print-table td:nth-child(6) { width: 92px; }
+#printArea .print-table td:nth-child(6) { width: 1%; }
 #printArea .print-table th { background: #f5f5f5 !important; font-weight: 600; }
 #printArea .print-table .num { text-align: right; }
 #printArea .print-table .sp { font-size: 11px; font-weight: 400; color: #444; margin-left: 2px; }
