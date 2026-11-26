@@ -1186,6 +1186,17 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
     text-align:right;font-weight:600;color:var(--primary-strong);
     font-variant-numeric:tabular-nums;
 }
+/* 单价格：输入框 + 涨跌小标（跟这家这货「最近一次单价」比） */
+.items-table td.td-price{display:flex;align-items:center;gap:6px;}
+.items-table td.td-price .i-price{flex:1 1 auto;min-width:68px;}
+.i-delta{
+    flex:0 0 auto;font-size:11px;font-weight:700;letter-spacing:.2px;line-height:1.35;
+    padding:2px 5px;border-radius:6px;white-space:nowrap;cursor:pointer;
+    font-variant-numeric:tabular-nums;user-select:none;
+}
+.i-delta.up{color:#b42318;background:#fef3f2;border:1px solid #fbd5d0;}
+.i-delta.down{color:#1f8a4c;background:#f1fbf5;border:1px solid #c9ecd7;}
+.i-delta:hover{filter:brightness(.96);}
 .th-small{font-size:11px;font-weight:400;color:#9aa7ba;margin-left:3px;}
 /* 单价框不要上下箭头，也不要滚轮/方向键改数：纯手输或点历史价 */
 .items-table .i-price{-moz-appearance:textfield;appearance:textfield;}
@@ -2462,6 +2473,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                 /* 请求回来时用户可能还没填商品名，这里再补刷一轮 */
                 if (currentWholesaler() === name) {
                     refreshPriceTip();
+                    refreshAllPriceDelta();
                     /* 如果单价框还停着，把浮层也补上 */
                     const ae = document.activeElement;
                     if (ae && ae.classList && ae.classList.contains('i-price')) showPriceTip(ae.closest('tr'));
@@ -2490,6 +2502,46 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     /* 历史价只走自绘浮层，不再挂 datalist（两套下拉会互相遮挡） */
     function refreshPriceTip() {
         if (priceTipRow) showPriceTip(priceTipRow);   /* 浮层开着就跟着刷新 */
+    }
+
+    /* ---------- 涨跌小标：本行单价 VS 这家这货「最近一次」单价 ----------
+       只提示、不拦人：涨价标红、降价标绿，差得太小（<0.5%）就不显示，免得噪声刷屏 */
+    function refreshPriceDelta(tr) {
+        if (!tr) return;
+        const el  = tr.querySelector('.i-delta');
+        const pEl = cellInput(tr, CELL_PRICE);
+        if (!el || !pEl) return;
+
+        el.hidden = true;
+        el.textContent = '';
+        el.classList.remove('up', 'down');
+
+        const list = priceListFor(tr);
+        const cur  = parseFloat(pEl.value);
+        if (!list || !list.length || !isFinite(cur) || cur <= 0) return;
+
+        const base = list[0];
+        const bp   = parseFloat(base.price);
+        if (!isFinite(bp) || bp <= 0) return;
+
+        const pct = (cur - bp) / bp * 100;
+        if (!isFinite(pct) || Math.abs(pct) < 0.5) return;
+
+        const up = pct > 0;
+        el.textContent = (up ? '↑' : '↓') + Math.abs(pct).toFixed(1) + '%';
+        el.classList.add(up ? 'up' : 'down');
+        el.title = '上次 ' + fmtPriceText(bp) + '（' + (base.odate || '—')
+                 + (base.unit ? '，' + base.unit : '') + '），共 ' + list.length + ' 次记录；点一下看全部历史价';
+        el.hidden = false;
+    }
+
+    function refreshAllPriceDelta() {
+        if (!itemsBody) return;
+        for (const tr of itemsBody.rows) refreshPriceDelta(tr);
+    }
+
+    function fmtPriceText(v) {
+        return (Math.round(v * 100) / 100).toFixed(2);
     }
 
     /* ---------- 规格建议：填完商品名后，把这个货以前用过的规格挂到 datalist ---------- */
@@ -2594,10 +2646,12 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 
             const priceEl = priceTipRow.querySelector('.i-price');
             if (!priceEl) return;
+            const tr = priceTipRow;
             priceEl.value = item.dataset.price || '0.00';
             formatPrice(priceEl);
             recalc();
             hidePriceTip();
+            refreshPriceDelta(tr);
             priceEl.focus();
         });
         return priceTip;
@@ -2914,7 +2968,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             + '<td><input class="i-spec" placeholder="选填规格" autocomplete="off"></td>'
             + '<td><input class="i-unit" placeholder="箱 / 个"></td>'
             + '<td><input class="i-qty" type="number" step="1" min="0" data-prec="0" data-last="1" value="1"></td>'
-            + '<td><input class="i-price" type="text" inputmode="decimal" value="0.00" autocomplete="off" placeholder="0.00"></td>'
+            + '<td class="td-price"><input class="i-price" type="text" inputmode="decimal" value="0.00" autocomplete="off" placeholder="0.00"><span class="i-delta" hidden title=""></span></td>'
             + '<td><input class="i-sub" type="text" inputmode="decimal" value="0.00" autocomplete="off" placeholder="或填总价"></td>'
             + '<td><button type="button" class="row-del" title="删除此行">×</button></td>'
             + '</tr>';
@@ -2939,6 +2993,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         syncQtyStep(tr.querySelector('.i-qty'));
         formatPrice(pr);             /* 单价一律显示两位小数 */
         itemsBody.appendChild(tr);
+        refreshPriceDelta(tr);       /* 编辑已有单时也能立刻看到与历史价的差 */
         if (!skipRecalc) recalc();
         return tr;
     }
@@ -3048,6 +3103,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             if (specEl) specDatalist(specEl).innerHTML = '';
             scheduleNameSuggest(tr, t.value.trim());
             scheduleSpecOptions(tr);
+            refreshPriceDelta(tr);                       /* 换了商品，跟历史价的比较要重算 */
             return;
         }
 
@@ -3078,6 +3134,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         /* 只刷这一行的小计 + 底部合计：行数多时也不卡 */
         recalcRow(tr);
         recalcTotals();
+        if (t.classList.contains('i-price')) refreshPriceDelta(tr);   /* 涨跌小标跟着单价走 */
     });
 
     /* 批发商名变化 → 取该批发商的历史单价，并刷新所有行的建议列表 */
@@ -3091,6 +3148,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         priceTimer = setTimeout(() => {
             ensurePriceHistory(name);
             refreshPriceTip();
+            refreshAllPriceDelta();
         }, 300);
     });
 
@@ -3098,12 +3156,14 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         const name = currentWholesaler();
         if (name) ensurePriceHistory(name);
         refreshPriceTip();
+        refreshAllPriceDelta();     /* 换了批发商，比较基准整表换一套 */
     });
 
     on(itemsBody, 'change', (e) => {
         const t = e.target;
         /* 商品名定格（Tab / 回车 / 失焦）→ 立刻把规格候选准备好 */
         if (t.classList.contains('i-name')) ensureSpecOptions(t.closest('tr'));
+        if (t.classList.contains('i-name')) refreshPriceDelta(t.closest('tr'));
         if (t.classList.contains('i-qty')) syncQtyStep(t);
         /* 小计填完总价 → 按数量反算单价，之后仍按「数量 × 单价」口径落库 */
         if (t.classList.contains('i-sub')) {
@@ -3118,6 +3178,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                 recalc();
             }
             formatPrice(t);
+            refreshPriceDelta(t.closest('tr'));
         }
     });
 
@@ -3249,11 +3310,18 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         }
         if (!priceTipRow) return;
         if (priceTip && priceTip.contains(e.target)) return;
-        if (e.target.closest('.i-price')) return;
+        if (e.target.closest('.i-price') || e.target.closest('.i-delta')) return;
         hidePriceTip();
     });
 
     on(itemsBody, 'click', (e) => {
+        /* 点涨跌小标：等于回到单价框，顺便把历史价浮层打开 */
+        if (e.target.classList.contains('i-delta')) {
+            const tr = e.target.closest('tr');
+            const pEl = tr ? tr.querySelector('.i-price') : null;
+            if (pEl) { pEl.focus(); ensurePriceHistory(currentWholesaler()); showPriceTip(tr); }
+            return;
+        }
         /* 已经是聚焦状态时再点输入框不会触发 focusin，这里补一次弹出 */
         if (e.target.classList.contains('i-price')) {
             hideNameTip();
@@ -3278,6 +3346,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             tr.querySelector('.i-qty').value   = '1';
             tr.querySelector('.i-price').value = '0.00';
             syncQtyStep(tr.querySelector('.i-qty'));
+            refreshPriceDelta(tr);
             recalc();
             return;
         }
