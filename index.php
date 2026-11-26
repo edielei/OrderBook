@@ -3397,6 +3397,23 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         hideNameTip();
         const tr = del.closest('tr');
 
+        /* 有内容的行才问一句，空行直接清掉，免得录单时一直弹窗 */
+        const nmEl  = tr.querySelector('.i-name');
+        const spEl  = tr.querySelector('.i-spec');
+        const qtEl  = tr.querySelector('.i-qty');
+        const prEl  = tr.querySelector('.i-price');
+        const sbEl  = tr.querySelector('.i-sub');
+        const nm    = nmEl ? nmEl.value.trim() : '';
+        const filled = nm !== ''
+            || (spEl && spEl.value.trim() !== '')
+            || ((parseFloat(qtEl ? qtEl.value : '') || 0) !== 1)
+            || ((parseFloat(prEl ? prEl.value : '') || 0) !== 0)
+            || ((parseFloat(sbEl ? sbEl.value : '') || 0) !== 0);
+
+        if (filled && !confirm(nm ? '删除「' + nm + '」这一行？' : '删除这一行？')) {
+            return;
+        }
+
         /* 只剩一行时不清空表格结构，只把内容复位 */
         if (itemsBody.rows.length <= 1) {
             tr.querySelectorAll('input').forEach((i) => { i.value = ''; });
