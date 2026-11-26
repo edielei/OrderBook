@@ -1659,7 +1659,11 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 .flag-toggle svg{flex:none;transition:transform .16s;}
 .flag-toggle:hover{border-color:#b9c8da;background:#f7fafd;color:#2f6fed;}
 .flag-toggle.is-on{border-color:#f5c678;background:#fff8ec;color:#8a5300;}
-.flag-toggle.is-on svg{transform:rotate(-8deg) scale(1.05);}
+/* 方框勾起 = 已标记，未勾 = 未标记，状态一眼可见 */
+.flag-toggle .flag-box{fill:transparent;transition:fill .16s;}
+.flag-toggle .flag-tick{opacity:0;transition:opacity .14s;}
+.flag-toggle.is-on .flag-tick{opacity:1;}
+.flag-toggle.is-on .flag-box{fill:#ffefd4;}
 .flag-toggle:focus-visible{outline:2px solid #2f6fed;outline-offset:2px;}
 .flag-toggle-text{white-space:nowrap;}
 .flag-hint{font-style:normal;font-weight:400;color:#8b97a6;font-size:12px;}
@@ -1922,7 +1926,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                         <label>复核标记</label>
                         <div class="flag-row">
                             <button type="button" class="flag-toggle" id="f-flag" data-on="0" aria-pressed="false" title="点击切换是否需要复核">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>
+                                <svg class="flag-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect class="flag-box" x="3.5" y="3.5" width="17" height="17" rx="4"></rect><path class="flag-tick" d="M8 12.2l2.6 2.6 5.4-5.6"></path></svg>
                                 <span class="flag-toggle-text">标记复核</span>
                             </button>
                             <em class="flag-hint">数据存疑时点一下，原因写备注</em>
@@ -2302,7 +2306,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         fFlag.setAttribute('aria-pressed', isOn ? 'true' : 'false');
         const txt = fFlag.querySelector('.flag-toggle-text');
         if (txt) txt.textContent = isOn ? '取消复核' : '标记复核';
-        fFlag.title = isOn ? '已标记待复核，点击取消' : '点击切换是否需要复核';
+        fFlag.title = isOn ? '当前：已标记待复核，点击取消' : '当前：未标记，点击标记待复核';
     }
     if (fFlag) fFlag.addEventListener('click', async () => {
         setFlagOn(fFlag.dataset.on !== '1');
