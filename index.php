@@ -1497,6 +1497,30 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 .toast.ok{border-color:#b7e6c8;color:#1f8a4c;background:#f4fdf7;}
 .toast.error{border-color:#ffc9cf;color:#d63a4d;background:#fff6f7;}
 
+/* ---------- 回到顶部 ---------- */
+.to-top{
+    position: fixed;
+    right: 18px;
+    bottom: 14px;
+    width: 44px;
+    height: 44px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #fff;
+    color: var(--primary);
+    box-shadow: 0 6px 18px rgba(31,45,80,.12);
+    cursor: pointer;
+    z-index: 70;
+    transition: transform .16s, background .16s, color .16s, box-shadow .16s;
+}
+.to-top.show{display: flex;}
+.to-top:hover{background: var(--primary); color:#fff; border-color: var(--primary); box-shadow: 0 8px 20px rgba(79,110,247,.28);}
+.to-top:active{transform: translateY(1px);}
+.to-top:focus-visible{outline:2px solid #c3d4ff;outline-offset:2px;}
+
 /* ---------- 打印样式 (A4) ---------- */
 /* 打印排版样式只维护这一份：#printArea 平时隐藏，屏幕上看不见；
    页面内打印（@media print）和 iframe 打印窗口共用同一份规则，
@@ -1601,6 +1625,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     .tabs{width:100%;}
     .tab-btn{flex:1;padding:9px 10px;}
     .page-info{margin-left:0;text-align:center;}
+    .to-top{right:14px; bottom:18px; width:42px; height:42px; border-radius:12px;}
 }
 
 /* ---------- 批发商列表：窄屏（手机 / 平板 / 窄窗口）收紧列宽与字号 ----------
@@ -1986,6 +2011,11 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 <!-- 打印专用容器 -->
 <div id="printArea"></div>
 
+<!-- 回到顶部：滚过一屏后出现 -->
+<button type="button" id="toTop" class="to-top" aria-label="回到顶部" title="回到顶部">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+</button>
+
 <script>
 (function () {
     'use strict';
@@ -2295,6 +2325,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         hideNameTip();
         tabBtns.forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
         tabPanels.forEach((p) => p.classList.toggle('active', p.id === 'panel-' + name));
+        if (typeof syncToTop === 'function') setTimeout(syncToTop, 0);
     }
 
     tabBtns.forEach((b) => on(b, 'click', () => switchTab(b.dataset.tab)));
@@ -4388,6 +4419,31 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         renderShopTable();
         shopKeyword.focus();
     });
+
+    /* ============================================================
+       13.5 回到顶部
+       翻完长列表不想一路滚回去；滚过一屏才出现，顶部不碍眼
+       ============================================================ */
+    const toTopBtn = $('toTop');
+
+    function syncToTop() {
+        const btn = toTopBtn || $('toTop');
+        if (!btn) return;
+        const y = window.pageYOffset
+            || document.documentElement.scrollTop
+            || document.body.scrollTop || 0;
+        btn.classList.toggle('show', y > 320);
+    }
+
+    on(window, 'scroll', syncToTop, { passive: true });
+    on(toTopBtn, 'click', () => {
+        try {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        } catch (e) {
+            window.scrollTo(0, 0);       /* 老浏览器不认 behavior，直接跳 */
+        }
+    });
+    syncToTop();
 
     /* ============================================================
        14. 初始化
