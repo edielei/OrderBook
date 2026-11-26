@@ -1116,7 +1116,7 @@ h1{
 .tab-panel.active{display:block;}
 
 /* ---------- 统计卡 ---------- */
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px;}
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:16px;}
 .stat{
     background: var(--card); border: 1px solid #eef2f8; border-radius: var(--radius);
     padding: 16px 20px; box-shadow: 0 4px 18px rgba(35,60,110,0.03);
@@ -1135,13 +1135,11 @@ h1{
 .stat-value.money { color: var(--primary-strong); }
 .stat .unit { font-size: 13px; color: var(--muted); margin-left: 4px; font-weight: 500; }
 
-/* 存疑单数：一条跨整行的提示条，点一下直接筛出来 */
-.stat-flag{grid-column:1 / -1; cursor:pointer;}
+/* 存疑单数：第 5 张统计卡，点一下切换「只看存疑」 */
+.stat-flag{cursor:pointer;background:#fffdf8;border-color:#f7e2bf;}
 .stat-flag .stat-icon{background:#fff4e0;color:#d48806;}
-.stat-flag:hover{border-color:#f5c678;background:#fffdf8;}
-.stat-flag .stat-hint{margin-left:auto;font-size:12px;color:var(--muted);font-weight:500;letter-spacing:.2px;}
+.stat-flag:hover{border-color:#f2cf96;background:#fff9ef;}
 .stat-flag.is-zero{opacity:.7;}
-.stat-flag.is-zero .stat-hint{color:#b3bcc8;}
 
 /* ---------- 卡片 ---------- */
 .card{
@@ -1570,12 +1568,14 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 }
 /* ---------- 响应式 ---------- */
 @media (max-width:960px){
-    .stats{grid-template-columns:repeat(2,1fr);}
+    .stats{grid-template-columns:repeat(3,1fr);}
+    .stat-flag{grid-column:span 2;}   /* 3 列布局下第 5 张补满第二行 */
 }
 @media (max-width:600px){
     body{padding:22px 12px 34px;}
     .card{padding:16px 16px 20px;}
     .stats{grid-template-columns:1fr;gap:12px;}
+    .stat-flag{grid-column:auto;}
     .stat{padding:16px 20px;}
     .batch-meta{grid-template-columns:1fr;}
     .field-note-full{grid-column:auto;}
@@ -1738,7 +1738,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                     <strong class="stat-value money">￥<span id="stat-month-amount"><?= $stats['month_amount'] ?></span></strong>
                 </div>
             </div>
-            <div class="stat stat-flag<?= (int)$stats['flagged_count'] > 0 ? '' : ' is-zero' ?>" id="statFlagCard" tabindex="0" role="button" title="点击只看存疑">
+            <div class="stat stat-flag<?= (int)$stats['flagged_count'] > 0 ? '' : ' is-zero' ?>" id="statFlagCard" tabindex="0" role="button" title="点击切换只看存疑">
                 <div class="stat-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6l8.6 15.4H3.4z"></path><line x1="12" y1="9.6" x2="12" y2="14.2"></line><line x1="12" y1="16.8" x2="12" y2="16.9"></line></svg>
                 </div>
@@ -1746,7 +1746,6 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                     <span class="stat-label">存疑单数</span>
                     <strong class="stat-value"><span id="stat-flagged"><?= (int)$stats['flagged_count'] ?></span><span class="unit">单</span></strong>
                 </div>
-                <span class="stat-hint">点击只看存疑 →</span>
             </div>
         </div>
 
@@ -2236,21 +2235,17 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     on(shopFilter, 'change', () => refreshList(1));
     on(flagFilter, 'change', () => refreshList(1));
 
-    /* 点「存疑单数」这条 → 直接切到「只看存疑」 */
-    function openFlagFilter() {
+    /* 点「存疑单数」卡 → 切换「只看存疑」 */
+    function toggleFlagFilter() {
         if (!flagFilter) return;
-        if (!flagFilter.checked) {
-            flagFilter.checked = true;
-            flagFilter.dispatchEvent(new Event('change', { bubbles: true }));
-        } else {
-            refreshList(1);
-        }
+        flagFilter.checked = !flagFilter.checked;
+        flagFilter.dispatchEvent(new Event('change', { bubbles: true }));
         scrollToPanel('list');
     }
     if (statFlagCard) {
-        statFlagCard.addEventListener('click', openFlagFilter);
+        statFlagCard.addEventListener('click', toggleFlagFilter);
         statFlagCard.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFlagFilter(); }
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFlagFilter(); }
         });
     }
 
