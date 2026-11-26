@@ -22,6 +22,8 @@ try {
             wholesaler TEXT NOT NULL DEFAULT '',
             odate      TEXT NOT NULL DEFAULT '',
             note       TEXT NOT NULL DEFAULT '',
+            flag       INTEGER NOT NULL DEFAULT 0,
+            flag_note  TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT ''
         )
     ");
@@ -65,6 +67,16 @@ try {
     }
     if (!$hasSpec) {
         $pdo->exec("ALTER TABLE items ADD COLUMN spec TEXT NOT NULL DEFAULT ''");
+    }
+
+    /* 老库补列：待复核标记 + 标记说明。
+       手写单看不清、补录旧单时先勾一下，事后能按标记集中筛出来复核 */
+    $batchCols = array_column($pdo->query("PRAGMA table_info(batches)")->fetchAll(), 'name');
+    if (!in_array('flag', $batchCols, true)) {
+        $pdo->exec("ALTER TABLE batches ADD COLUMN flag INTEGER NOT NULL DEFAULT 0");
+    }
+    if (!in_array('flag_note', $batchCols, true)) {
+        $pdo->exec("ALTER TABLE batches ADD COLUMN flag_note TEXT NOT NULL DEFAULT ''");
     }
 } catch (Throwable $e) {
     exit('数据库初始化失败：' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8'));
@@ -144,6 +156,7 @@ function getStats(PDO $pdo): array {
     /* 四条查询合成两条：总量一条、本月一条；本月改用日期区间比较，能走 idx_batches_date */
     $tot = $pdo->query("SELECT
                             (SELECT COUNT(*) FROM batches) AS c,
+                            (SELECT COUNT(*) FROM batches WHERE flag = 1) AS f,
                             (SELECT COALESCE(SUM(qty * price), 0) FROM items) AS s")->fetch();
 
     $mStart = date('Y-m-01');
@@ -159,6 +172,7 @@ function getStats(PDO $pdo): array {
 
     return [
         'total_count'  => (int)$tot['c'],
+        'flagged_count' => (int)$tot['f'],
         'total_amount' => number_format((float)$tot['s'], 2),
         'month_count'  => (int)$mon['c'],
         'month_amount' => number_format((float)$mon['s'], 2),
@@ -336,18 +350,23 @@ function buildPager(int $page, int $totalPages, int $totalRows, int $perPage): s
     return $html;
 }
 
-function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $page = 1, int $perPage = 10): string {
+function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $page = 1, int $perPage = 10, bool $flagOnly = false): string {
     $perPage = max(1, min(200, $perPage));   /* 兜底：每页最多 200 条 */
     $cond   = [];
     $params = [];
 
-    /* 搜索：关键词（商品名 / 规格 / 单位 / 批发商 / 备注） */
+    /* 搜索：关键词（商品名 / 规格 / 单位 / 批发商 / 备注 / 标记说明） */
     if ($q !== '') {
         $like = '%' . $q . '%';
-        $cond[] = "(b.wholesaler LIKE :q1 OR b.note LIKE :q2
+        $cond[] = "(b.wholesaler LIKE :q1 OR b.note LIKE :q2 OR b.flag_note LIKE :q6
                     OR EXISTS (SELECT 1 FROM items i WHERE i.batch_id = b.id
                                AND (i.name LIKE :q3 OR i.spec LIKE :q4 OR i.unit LIKE :q5)))";
-        $params += [':q1'=>$like, ':q2'=>$like, ':q3'=>$like, ':q4'=>$like, ':q5'=>$like];
+        $params += [':q1'=>$like, ':q2'=>$like, ':q3'=>$like, ':q4'=>$like, ':q5'=>$like, ':q6'=>$like];
+    }
+
+    /* 筛选：只看待复核 */
+    if ($flagOnly) {
+        $cond[] = "b.flag = 1";
     }
 
     /* 筛选：日期 */
@@ -384,7 +403,7 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
     $batches = $stmt->fetchAll();
 
     if (!$batches) {
-        $hasFilter = ($q !== '' || $date !== '' || $shop !== '');
+        $hasFilter = ($q !== '' || $date !== '' || $shop !== '' || $flagOnly);
         return '<div class="empty">'
             . ($hasFilter ? '没有找到符合条件的记录 🔍' : '暂无记录，切换到「录入进货单」开始记录吧 ✨')
             . '</div>';
@@ -404,7 +423,8 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         $list  = $items[$b['id']] ?? [];
         $totalMoney = 0;
         $totalQty = 0;
-        
+        $flagOn   = ((int)($b['flag'] ?? 0)) === 1;
+        $flagNote = (string)($b['flag_note'] ?? '');
         foreach ($list as $it) {
             $totalMoney += (float)$it['qty'] * (float)$it['price'];
             $totalQty += (float)$it['qty'];
@@ -416,6 +436,8 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         // 依然输出标准的 YYYY-MM-DD 格式
         $html .=       '<span class="batch-date js-set-date" title="点击筛选此日期">' . ($b['odate'] !== '' ? highlight($b['odate'], $q) : '未填日期') . '</span>';
         $html .=       '<span class="batch-shop js-set-shop" data-shop="' . h($b['wholesaler']) . '" title="点击筛选此批发商">' . ($b['wholesaler'] !== '' ? highlight($b['wholesaler'], $q) : '<em>未填写批发商</em>') . '</span>';
+        $html .=       ($flagOn ? '<button type="button" class="flag-badge js-unflag" data-id="' . (int)$b['id'] . '" title="点击标记为已复核'
+            . ($flagNote !== '' ? '：' . h($flagNote) : '') . '">待复核</button>' : '');
         $html .=     '</div>';
         $html .=     '<div class="batch-right">';
         $html .=       '<button type="button" class="btn-mini js-print" data-id="' . (int)$b['id'] . '">打印</button>';
@@ -454,6 +476,7 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         $html .=   '<div class="batch-foot">';
         $html .=     '<span class="batch-note">'
             . ($b['note'] !== '' ? '备注：' . highlight($b['note'], $q) : '')
+            . ($flagNote !== '' ? '<span class="flag-note">标记：' . highlight($flagNote, $q) . '</span>' : '')
             . '</span>';
         $html .=     '<div class="batch-summary">'
             . '<span class="batch-qty">总数量 <strong>' . fmtNum($totalQty) . '</strong></span>'
@@ -480,7 +503,8 @@ if ($ajax !== '') {
         $shop = qParam('w', 60);
         $page = max(1, (int)($_GET['page'] ?? 1));
         $per  = max(1, min(200, (int)($_GET['per'] ?? 10)));
-        echo renderList($pdo, $q, $date, $shop, $page, $per);
+        $flagOnly = ($_GET['f'] ?? '') === '1';
+        echo renderList($pdo, $q, $date, $shop, $page, $per, $flagOnly);
         exit;
     }
 
@@ -900,6 +924,9 @@ if ($ajax !== '') {
         $wholesaler = normalizeWholesalerName((string)($data['wholesaler'] ?? ''));
         $odate      = trim((string)($data['odate'] ?? ''));
         $note       = trim((string)($data['note'] ?? ''));
+        /* 「待复核」标记：勾了才算，取消勾选时连说明一起清掉，不留残余 */
+        $flag       = ((int)($data['flag'] ?? 0)) === 1 ? 1 : 0;
+        $flagNote   = $flag === 1 ? trim((string)($data['flag_note'] ?? '')) : '';
         $items      = $data['items'] ?? [];
 
         if ($odate === '') jsonOut(['ok' => false, 'msg' => '请选择进货日期'], 400);
@@ -942,6 +969,7 @@ if ($ajax !== '') {
         /* 截到 60 字后再收一次首尾空白，避免截断处正好落在空格上 */
         $wholesaler = normalizeWholesalerName(mb_substr($wholesaler, 0, 60));
         $note       = mb_substr($note, 0, 200);
+        $flagNote   = mb_substr($flagNote, 0, 100);
 
         try {
             $pdo->beginTransaction();
@@ -953,13 +981,13 @@ if ($ajax !== '') {
                     jsonOut(['ok' => false, 'msg' => '这张进货单已不存在，可能已被删除'], 404);
                 }
 
-                $stmt = $pdo->prepare("UPDATE batches SET wholesaler = :w, odate = :d, note = :n WHERE id = :id");
-                $stmt->execute([':w'=>$wholesaler, ':d'=>$odate, ':n'=>$note, ':id'=>$id]);
+                $stmt = $pdo->prepare("UPDATE batches SET wholesaler = :w, odate = :d, note = :n, flag = :f, flag_note = :fn WHERE id = :id");
+                $stmt->execute([':w'=>$wholesaler, ':d'=>$odate, ':n'=>$note, ':f'=>$flag, ':fn'=>$flagNote, ':id'=>$id]);
                 $pdo->prepare("DELETE FROM items WHERE batch_id = :id")->execute([':id' => $id]);
             } else {
-                $stmt = $pdo->prepare("INSERT INTO batches (wholesaler, odate, note, created_at)
-                                       VALUES (:w, :d, :n, :c)");
-                $stmt->execute([':w'=>$wholesaler, ':d'=>$odate, ':n'=>$note, ':c'=>date('Y-m-d H:i:s')]);
+                $stmt = $pdo->prepare("INSERT INTO batches (wholesaler, odate, note, flag, flag_note, created_at)
+                                       VALUES (:w, :d, :n, :f, :fn, :c)");
+                $stmt->execute([':w'=>$wholesaler, ':d'=>$odate, ':n'=>$note, ':f'=>$flag, ':fn'=>$flagNote, ':c'=>date('Y-m-d H:i:s')]);
                 $id = (int)$pdo->lastInsertId();
             }
 
@@ -1002,6 +1030,17 @@ if ($ajax !== '') {
         jsonOut(['ok' => true]);
     }
 
+    /* 一键取消「待复核」：核对无误后点一下徽章就清掉，不用进去逐项改 */
+    if ($ajax === 'unflag' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $data = bodyJson() ?? [];
+        $id   = (int)($data['id'] ?? 0);
+        if ($id <= 0) jsonOut(['ok' => false, 'msg' => '参数错误'], 400);
+        $stmt = $pdo->prepare("UPDATE batches SET flag = 0, flag_note = '' WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        if ($stmt->rowCount() === 0) jsonOut(['ok' => false, 'msg' => '这张进货单已不存在'], 404);
+        jsonOut(['ok' => true]);
+    }
+
     jsonOut(['ok' => false, 'msg' => '未知请求'], 400);
 }
 
@@ -1015,7 +1054,7 @@ $date     = normalizeDate(trim($_GET['d'] ?? '')) ?? '';   /* 非法日期一律
 $shop     = qParam('w', 60);
 $page     = max(1, (int)($_GET['page'] ?? 1));
 $perPage  = max(1, min(200, (int)($_GET['per'] ?? 10)));
-$listHtml = renderList($pdo, $q, $date, $shop, $page, $perPage);
+$listHtml = renderList($pdo, $q, $date, $shop, $page, $perPage, isset($_GET['f']) && $_GET['f'] === '1');
 $today    = date('Y-m-d');
 ?>
 <!DOCTYPE html>
@@ -1606,6 +1645,19 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     .items-table th:nth-child(6){width:90px  !important;}
     .items-table th:nth-child(7){width:44px  !important;}
 }
+
+/* ---- 待复核标记 ---- */
+.flag-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;padding:2px 9px;border-radius:999px;
+    font-size:12px;line-height:18px;color:#8a5300;background:#fff4e0;border:1px solid #ffd79a;white-space:nowrap;vertical-align:middle;
+    font-family:inherit;cursor:pointer;}
+.flag-badge:hover{background:#ffe9c8;border-color:#f5c678;}
+.flag-badge::before{content:"";width:6px;height:6px;border-radius:50%;background:#f5a524;}
+.flag-note{display:inline-block;margin-left:10px;padding:1px 7px;border-radius:6px;font-size:12px;color:#8a5300;background:#fff8ec;border:1px solid #ffe7bf;}
+.flag-check{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:#4a5563;user-select:none;font-style:normal;font-weight:500;}
+.flag-check input{width:16px;height:16px;margin:0;cursor:pointer;accent-color:#2f6fed;}
+.flag-check .flag-hint{font-style:normal;font-weight:400;color:#8b97a6;font-size:12px;}
+.flag-num{min-width:20px;padding:0 6px;border-radius:999px;background:#fff4e0;color:#8a5300;font-size:12px;text-align:center;}
+.filter-flag{margin-left:2px;}
 </style>
 </head>
 <body>
@@ -1702,6 +1754,14 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                             <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
                         </span>
                         <input type="date" id="dateFilterNative" value="<?= h($date) ?>" tabindex="-1" style="position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none;">
+                    </div>
+
+                    <div class="filter-item">
+                        <label class="flag-check filter-flag">
+                            <input type="checkbox" id="flagFilter"<?= isset($_GET['f']) && $_GET['f'] === '1' ? ' checked' : '' ?>>
+                            <span>只看待复核</span>
+                            <span class="flag-num" id="flagCount"><?= (int)$stats['flagged_count'] ?></span>
+                        </label>
                     </div>
 
                     <button type="button" class="btn btn-ghost btn-sm" id="clearFilterBtn">清除筛选</button>
@@ -1850,6 +1910,14 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                     <div class="field field-note-full">
                         <label for="f-note">备注</label>
                         <input id="f-note" maxlength="200" placeholder="选填，如联系人、结款方式等">
+                    </div>
+                    <div class="field field-note-full">
+                        <label for="f-flag-note" class="flag-check">
+                            <input type="checkbox" id="f-flag">
+                            <span>标记为待复核</span>
+                            <em class="flag-hint">手写看不清、补录旧单时先勾上，回头能一键筛出来改</em>
+                        </label>
+                        <input id="f-flag-note" maxlength="100" placeholder="说明：字迹不清 / 补录 8 月旧单 …（选填）">
                     </div>
                 </div>
 
@@ -2052,6 +2120,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     const clearSearchBtn  = $('clearSearchBtn');
 
     const shopFilter       = $('shopFilter');
+    const flagFilter       = $('flagFilter');
+    const flagCount        = $('flagCount');
     const dateFilterText   = $('dateFilterText');
     const dateFilterNative = $('dateFilterNative');
     const dateFilterTrigger= $('dateFilterTrigger');
@@ -2131,6 +2201,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     });
 
     on(shopFilter, 'change', () => refreshList(1));
+    on(flagFilter, 'change', () => refreshList(1));
 
     /* 已生效的筛选条件 → 可单独移除的小标签 */
     function clearDateFilter() {
@@ -2145,6 +2216,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         const chips = [];
         if (shop) chips.push({ k: 'shop', label: '批发商：' + shop });
         if (date) chips.push({ k: 'date', label: '日期：' + date });
+        if (flagFilter && flagFilter.checked) chips.push({ k: 'flag', label: '只看待复核' });
 
         if (!chips.length) {
             filterChips.innerHTML = '';
@@ -2160,11 +2232,13 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         if (!x) return;
         if (x.dataset.chip === 'shop' && shopFilter) shopFilter.value = '';
         if (x.dataset.chip === 'date') clearDateFilter();
+        if (x.dataset.chip === 'flag' && flagFilter) flagFilter.checked = false;
         refreshList(1);
     });
 
     on(clearFilterBtn, 'click', () => {
         if (shopFilter) shopFilter.value = '';
+        if (flagFilter) flagFilter.checked = false;
         clearDateFilter();
         refreshList(1);
     });
@@ -2210,6 +2284,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     const fOdateText   = $('f-odate-text');
     const fOdateNative = $('f-odate-native');
     const fNote        = $('f-note');
+    const fFlag        = $('f-flag');
+    const fFlagNote    = $('f-flag-note');
     const itemsBody    = $('itemsBody');
     const addRowBtn    = $('addRow');
     const grandTotalEl = $('grandTotal');
@@ -3195,6 +3271,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         fOdateNative.value = TODAY;
         markInvalid(fOdateText, false);
         fNote.value        = '';
+        if (fFlag)     fFlag.checked   = false;
+        if (fFlagNote) fFlagNote.value = '';
         itemsBody.innerHTML = '';
         addRow();
         formTitle.textContent = '新增进货单';
@@ -3265,6 +3343,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                 wholesaler: saveWholesaler,
                 odate:      dateRes.iso,
                 note:       fNote.value.trim(),
+                flag:       (fFlag && fFlag.checked) ? 1 : 0,
+                flag_note:  (fFlag && fFlag.checked && fFlagNote) ? fFlagNote.value.trim() : '',
                 items:      items
             });
 
@@ -3306,9 +3386,10 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         const q = searchInput ? searchInput.value.trim() : '';
         const d = dateFilterText ? normDate(dateFilterText.value) : '';
         const w = shopFilter ? shopFilter.value : '';
+        const f = (flagFilter && flagFilter.checked) ? '1' : '';
 
         const params = new URLSearchParams({
-            ajax: 'list', page: String(p), q: q, d: d, w: w, per: String(currentPer || 10)
+            ajax: 'list', page: String(p), q: q, d: d, w: w, per: String(currentPer || 10), f: f
         });
 
         if (listAbort) listAbort.abort();          /* 取消上一次还没回来的请求 */
@@ -3353,6 +3434,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             if (statAmount)      statAmount.textContent      = d.total_amount;
             if (statMonthCount)  statMonthCount.textContent  = d.month_count;
             if (statMonthAmount) statMonthAmount.textContent = d.month_amount;
+            if (flagCount)       flagCount.textContent       = d.flagged_count;
         } catch (err) { /* 统计失败不影响主流程 */ }
     }
 
@@ -3439,12 +3521,15 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         const dateEl   = card.querySelector('.batch-date');
         const shopEl   = card.querySelector('.batch-shop');
         const noteEl   = card.querySelector('.batch-note');
+        const flagEl   = card.querySelector('.flag-badge');
+        const flagNoteEl = card.querySelector('.flag-note');
         const qtyEl    = card.querySelector('.batch-qty strong');
         const moneyEl  = card.querySelector('.batch-total strong');
 
         const date       = dateEl  ? dateEl.textContent.trim()  : '';
         const wholesaler = shopEl  ? shopEl.textContent.trim()  : '';
-        const noteTxt    = noteEl  ? noteEl.textContent.replace('备注：', '').trim() : '';
+        const noteTxt    = noteEl  ? noteEl.textContent.replace('备注：', '')
+                                            .replace(flagNoteEl ? flagNoteEl.textContent : '', '').trim() : '';
         const totalQty   = qtyEl   ? qtyEl.textContent.trim()   : '';
         const totalMoney = moneyEl ? moneyEl.textContent.trim() : '';
 
@@ -3453,6 +3538,11 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         html += '<div class="print-meta">';
         html += '<div><strong>批发商：</strong>' + (wholesaler === '未填写批发商' ? '—' : esc(wholesaler)) + '</div>';
         html += '<div><strong>日期：</strong>' + (date === '未填日期' ? '—' : esc(date)) + '</div>';
+        /* 打了「待复核」的单，打印样张上也留一行，对着纸核对时一眼能看到 */
+        if (flagEl) {
+            const fNote = flagNoteEl ? flagNoteEl.textContent.replace('标记：', '').trim() : '';
+            html += '<div><strong>标记：</strong>待复核' + (fNote ? '（' + esc(fNote) + '）' : '') + '</div>';
+        }
         html += '</div>';
         html += '<table class="print-table">';
         html += '<thead><tr><th>#</th><th>商品名称</th><th>单位</th><th class="num">数量</th><th class="num">单价</th><th class="num">小计</th></tr></thead><tbody>';
@@ -3656,6 +3746,19 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             return;
         }
 
+        /* ---- 点「待复核」徽章 → 标记为已复核 ---- */
+        const unflagBtn = e.target.closest('.js-unflag');
+        if (unflagBtn) {
+            try {
+                await callAPI('?ajax=unflag', { id: parseInt(unflagBtn.dataset.id, 10) });
+                toast('已标记为已复核', 'ok');
+                await Promise.all([refreshList(currentPage), refreshStats()]);
+            } catch (err) {
+                toast(err.message || '操作失败', 'error');
+            }
+            return;
+        }
+
         /* ---- 打印 ---- */
         const printBtn = e.target.closest('.js-print');
         if (printBtn) {
@@ -3676,6 +3779,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                 fOdateText.value   = b.odate || TODAY;
                 fOdateNative.value = b.odate || TODAY;
                 fNote.value        = b.note || '';
+                if (fFlag)     fFlag.checked   = !!b.flag;
+                if (fFlagNote) fFlagNote.value = b.flag_note || '';
                 markInvalid(fOdateText, false);      /* 清掉上一次残留的红框 */
 
                 itemsBody.innerHTML = '';
