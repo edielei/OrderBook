@@ -60,7 +60,7 @@ php -S 127.0.0.1:8000 -t .
 ### 首次访问会发生什么
 
 1. 在程序同目录创建 `orders.sqlite`，已存在则复用，不清空
-2. 自动建表 `batches` / `items` / `wholesalers` 及索引；老库缺 `items.spec`、`batches.flag` / `flag_note` 列会自动补上
+2. 自动建表 `batches` / `items` / `wholesalers` 及索引；老库缺 `items.spec`、`batches.flag` 列会自动补上
 3. 批发商档案为空时，把历史进货单里出现过的批发商名导入一次；之后只在新增单据时增量补充
 
 数据库按目录定位、不认文件名，移动目录时把 `orders.sqlite` 一起挪走。
@@ -196,7 +196,6 @@ batches        -- 进货单，一单一条
   odate       TEXT    -- 进货日期 YYYY-MM-DD
   note        TEXT
   flag        INTEGER -- 1 = 存疑，0 = 正常
-  flag_note   TEXT    -- 旧版标记说明，已退役，新数据写空
   created_at  TEXT
 
 items          -- 单据里的商品明细

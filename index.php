@@ -23,7 +23,6 @@ try {
             odate      TEXT NOT NULL DEFAULT '',
             note       TEXT NOT NULL DEFAULT '',
             flag       INTEGER NOT NULL DEFAULT 0,
-            flag_note  TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT ''
         )
     ");
@@ -69,14 +68,11 @@ try {
         $pdo->exec("ALTER TABLE items ADD COLUMN spec TEXT NOT NULL DEFAULT ''");
     }
 
-    /* 老库补列：存疑标记 + 标记说明。
-       手写单看不清、补录旧单时先勾一下，事后能按标记集中筛出来复核 */
+    /* 老库补列：存疑标记。
+       手写单看不清、补录旧单时先标一下，事后能按标记集中筛出来核对 */
     $batchCols = array_column($pdo->query("PRAGMA table_info(batches)")->fetchAll(), 'name');
     if (!in_array('flag', $batchCols, true)) {
         $pdo->exec("ALTER TABLE batches ADD COLUMN flag INTEGER NOT NULL DEFAULT 0");
-    }
-    if (!in_array('flag_note', $batchCols, true)) {
-        $pdo->exec("ALTER TABLE batches ADD COLUMN flag_note TEXT NOT NULL DEFAULT ''");
     }
 } catch (Throwable $e) {
     exit('数据库初始化失败：' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8'));
@@ -270,35 +266,6 @@ function getWholesalerNames(PDO $pdo): array {
     return $rows;
 }
 
-/* 某个批发商的商品清单（按商品名聚合它的进货明细） */
-function getWholesalerItems(PDO $pdo, string $name): array {
-    $sql = "SELECT i.name AS pname,
-                   GROUP_CONCAT(DISTINCT i.unit) AS units,
-                   COUNT(DISTINCT i.batch_id) AS cnt,
-                   SUM(i.qty) AS qty,
-                   SUM(i.qty * i.price) AS amount,
-                   MAX(b.odate) AS last_date
-            FROM items i JOIN batches b ON b.id = i.batch_id
-            WHERE b.wholesaler = :n
-            GROUP BY i.name
-            ORDER BY amount DESC, pname ASC";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([':n' => $name]);
-
-    $rows = [];
-    foreach ($stmt->fetchAll() as $r) {
-        $rows[] = [
-            'name'      => (string)$r['pname'],
-            'units'     => (string)($r['units'] ?? ''),
-            'cnt'       => (int)$r['cnt'],
-            'qty'       => fmtNum($r['qty'] ?? 0),
-            'amount'    => number_format((float)($r['amount'] ?? 0), 2),
-            'last_date' => (string)($r['last_date'] ?? ''),
-        ];
-    }
-    return $rows;
-}
-
 function buildPager(int $page, int $totalPages, int $totalRows, int $perPage): string {
     if ($totalRows === 0) return '';
     
@@ -355,13 +322,13 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
     $cond   = [];
     $params = [];
 
-    /* 搜索：关键词（商品名 / 规格 / 单位 / 批发商 / 备注 / 标记说明） */
+    /* 搜索：关键词（商品名 / 规格 / 单位 / 批发商 / 备注） */
     if ($q !== '') {
         $like = '%' . $q . '%';
-        $cond[] = "(b.wholesaler LIKE :q1 OR b.note LIKE :q2 OR b.flag_note LIKE :q6
+        $cond[] = "(b.wholesaler LIKE :q1 OR b.note LIKE :q2
                     OR EXISTS (SELECT 1 FROM items i WHERE i.batch_id = b.id
                                AND (i.name LIKE :q3 OR i.spec LIKE :q4 OR i.unit LIKE :q5)))";
-        $params += [':q1'=>$like, ':q2'=>$like, ':q3'=>$like, ':q4'=>$like, ':q5'=>$like, ':q6'=>$like];
+        $params += [':q1'=>$like, ':q2'=>$like, ':q3'=>$like, ':q4'=>$like, ':q5'=>$like];
     }
 
     /* 筛选：只看存疑 */
@@ -424,7 +391,6 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         $totalMoney = 0;
         $totalQty = 0;
         $flagOn   = ((int)($b['flag'] ?? 0)) === 1;
-        $flagNote = (string)($b['flag_note'] ?? '');
         foreach ($list as $it) {
             $totalMoney += (float)$it['qty'] * (float)$it['price'];
             $totalQty += (float)$it['qty'];
@@ -475,7 +441,6 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         $html .=   '<div class="batch-foot">';
         $html .=     '<span class="batch-note">'
             . ($b['note'] !== '' ? '备注：' . highlight($b['note'], $q) : '')
-            . ($flagNote !== '' ? '<span class="flag-note">标记：' . highlight($flagNote, $q) . '</span>' : '')
             . '</span>';
         $html .=     '<div class="batch-summary">'
             . '<span class="batch-qty">合计数量 <strong>' . fmtNum($totalQty) . '</strong></span>'
@@ -923,7 +888,7 @@ if ($ajax !== '') {
         $wholesaler = normalizeWholesalerName((string)($data['wholesaler'] ?? ''));
         $odate      = trim((string)($data['odate'] ?? ''));
         $note       = trim((string)($data['note'] ?? ''));
-        /* 「存疑」标记：按钮点开才算；原因记在备注里，flag_note 仅作老数据兼容 */
+        /* 「存疑」标记：按钮点开才算；原因记在备注里 */
         $flag       = ((int)($data['flag'] ?? 0)) === 1 ? 1 : 0;
         $items      = $data['items'] ?? [];
 
@@ -978,13 +943,12 @@ if ($ajax !== '') {
                     jsonOut(['ok' => false, 'msg' => '这张进货单已不存在，可能已被删除'], 404);
                 }
 
-                $stmt = $pdo->prepare("UPDATE batches SET wholesaler = :w, odate = :d, note = :n, flag = :f,
-                                       flag_note = CASE WHEN :f = 1 THEN flag_note ELSE '' END WHERE id = :id");
+                $stmt = $pdo->prepare("UPDATE batches SET wholesaler = :w, odate = :d, note = :n, flag = :f WHERE id = :id");
                 $stmt->execute([':w'=>$wholesaler, ':d'=>$odate, ':n'=>$note, ':f'=>$flag, ':id'=>$id]);
                 $pdo->prepare("DELETE FROM items WHERE batch_id = :id")->execute([':id' => $id]);
             } else {
-                $stmt = $pdo->prepare("INSERT INTO batches (wholesaler, odate, note, flag, flag_note, created_at)
-                                       VALUES (:w, :d, :n, :f, '', :c)");
+                $stmt = $pdo->prepare("INSERT INTO batches (wholesaler, odate, note, flag, created_at)
+                                       VALUES (:w, :d, :n, :f, :c)");
                 $stmt->execute([':w'=>$wholesaler, ':d'=>$odate, ':n'=>$note, ':f'=>$flag, ':c'=>date('Y-m-d H:i:s')]);
                 $id = (int)$pdo->lastInsertId();
             }
@@ -1033,7 +997,7 @@ if ($ajax !== '') {
         $data = bodyJson() ?? [];
         $id   = (int)($data['id'] ?? 0);
         if ($id <= 0) jsonOut(['ok' => false, 'msg' => '参数错误'], 400);
-        $stmt = $pdo->prepare("UPDATE batches SET flag = 0, flag_note = '' WHERE id = :id");
+        $stmt = $pdo->prepare("UPDATE batches SET flag = 0 WHERE id = :id");
         $stmt->execute([':id' => $id]);
         if ($stmt->rowCount() === 0) jsonOut(['ok' => false, 'msg' => '这张进货单已不存在'], 404);
         jsonOut(['ok' => true]);
@@ -1249,7 +1213,6 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
 .name-tip{max-width:380px;}
 .pty-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-weight:600;}
 .pty-meta{flex:none;color:#8a97ab;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap;}
-.pty-tag{margin-left:6px;font-style:normal;font-size:11px;color:#2f66e8;background:#eef4ff;border-radius:6px;padding:1px 5px;font-weight:500;}
 
 .row-del{
     width:30px;height:30px;border-radius:9px;border:1px solid var(--line);
@@ -1668,7 +1631,6 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     font-size:12px;line-height:18px;color:#8a5300;background:#fff4e0;border:1px solid #ffd79a;white-space:nowrap;vertical-align:middle;
     font-family:inherit;cursor:default;user-select:none;}
 .flag-badge::before{content:"";width:6px;height:6px;border-radius:50%;background:#f5a524;}
-.flag-note{display:inline-block;margin-left:10px;padding:1px 7px;border-radius:6px;font-size:12px;color:#8a5300;background:#fff8ec;border:1px solid #ffe7bf;}
 .flag-check{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:#4a5563;user-select:none;font-style:normal;font-weight:500;}
 .flag-check input{width:16px;height:16px;margin:0;cursor:pointer;accent-color:#2f6fed;}
 .flag-check .flag-hint{font-style:normal;font-weight:400;color:#8b97a6;font-size:12px;}
@@ -1721,7 +1683,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                     <span class="stat-label">累计单数</span>
                     <strong class="stat-value"><span id="stat-count"><?= $stats['total_count'] ?></span><span class="unit">单</span></strong>
                 </div>
-                <div class="stat-flagbox<?= (int)$stats['flagged_count'] > 0 ? '' : ' is-zero' ?>" id="statFlagBox" tabindex="0" role="button" title="数据存疑，待核对｜点击只看存疑" style="<?= (int)$stats['flagged_count'] > 0 ? '' : 'display:none' ?>">
+                <div class="stat-flagbox" id="statFlagBox" tabindex="0" role="button" title="数据存疑，待核对｜点击只看存疑" style="<?= (int)$stats['flagged_count'] > 0 ? '' : 'display:none' ?>">
                     <span class="flagbox-num" id="stat-flagged"><?= (int)$stats['flagged_count'] ?></span>
                     <span class="flagbox-label">存疑</span>
                 </div>
@@ -2985,7 +2947,6 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
        万一结构被动过，退回按类名查找，不会因为拿不到节点就把金额算成 0 */
     const CELL_QTY = 3;
     const CELL_PRICE = 4;
-    const CELL_SUB = 5;
 
     function cellInput(tr, idx) {
         const cell = tr.cells && tr.cells[idx];
@@ -3507,7 +3468,6 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             if (statFlagged)     statFlagged.textContent     = d.flagged_count;
             if (statFlagBox) {
                 const has = d.flagged_count > 0;
-                statFlagBox.classList.toggle('is-zero', !has);
                 statFlagBox.style.display = has ? '' : 'none';
             }
         } catch (err) { /* 统计失败不影响主流程 */ }
@@ -3597,14 +3557,12 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         const shopEl   = card.querySelector('.batch-shop');
         const noteEl   = card.querySelector('.batch-note');
         const flagEl   = card.querySelector('.flag-badge');
-        const flagNoteEl = card.querySelector('.flag-note');
         const qtyEl    = card.querySelector('.batch-qty strong');
         const moneyEl  = card.querySelector('.batch-total strong');
 
         const date       = dateEl  ? dateEl.textContent.trim()  : '';
         const wholesaler = shopEl  ? shopEl.textContent.trim()  : '';
-        const noteTxt    = noteEl  ? noteEl.textContent.replace('备注：', '')
-                                            .replace(flagNoteEl ? flagNoteEl.textContent : '', '').trim() : '';
+        const noteTxt    = noteEl  ? noteEl.textContent.replace('备注：', '').trim() : '';
         const totalQty   = qtyEl   ? qtyEl.textContent.trim()   : '';
         const totalMoney = moneyEl ? moneyEl.textContent.trim() : '';
 
@@ -3615,8 +3573,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         html += '<div><strong>日期：</strong>' + (date === '未填日期' ? '—' : esc(date)) + '</div>';
         /* 打了「存疑」的单，打印样张上也留一行，对着纸核对时一眼能看到 */
         if (flagEl) {
-            const fNote = flagNoteEl ? flagNoteEl.textContent.replace('标记：', '').trim() : '';
-            html += '<div><strong>标记：</strong>存疑' + (fNote ? '（' + esc(fNote) + '）' : '') + '</div>';
+            html += '<div><strong>标记：</strong>存疑</div>';
         }
         html += '</div>';
         html += '<table class="print-table">';
