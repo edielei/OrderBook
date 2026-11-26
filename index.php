@@ -1925,7 +1925,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                         <div class="flag-row">
                             <button type="button" class="flag-toggle" id="f-flag" data-on="0" aria-pressed="false" title="点击切换是否需要复核">
                                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>
-                                <span class="flag-toggle-text">标记待复核</span>
+                                <span class="flag-toggle-text">标记复核</span>
                             </button>
                             <em class="flag-hint">看不清、名称存疑、疑似写错时点一下，原因写备注</em>
                         </div>
@@ -2305,7 +2305,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         fFlag.classList.toggle('is-on', isOn);
         fFlag.setAttribute('aria-pressed', isOn ? 'true' : 'false');
         const txt = fFlag.querySelector('.flag-toggle-text');
-        if (txt) txt.textContent = isOn ? '待复核 · 点击取消' : '标记待复核';
+        if (txt) txt.textContent = isOn ? '取消复核' : '标记复核';
         fFlag.title = isOn ? '已标记待复核，点击取消' : '点击切换是否需要复核';
     }
     if (fFlag) fFlag.addEventListener('click', () => setFlagOn(fFlag.dataset.on !== '1'));
