@@ -1927,7 +1927,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>
                                 <span class="flag-toggle-text">标记复核</span>
                             </button>
-                            <em class="flag-hint">看不清、名称存疑、疑似写错时点一下，原因写备注</em>
+                            <em class="flag-hint">看不清、名称或价格存疑时点一下，原因写备注</em>
                         </div>
                     </div>
                 </div>
