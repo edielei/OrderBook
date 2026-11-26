@@ -1116,7 +1116,7 @@ h1{
 .tab-panel.active{display:block;}
 
 /* ---------- 统计卡 ---------- */
-.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:16px;}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px;}
 .stat{
     background: var(--card); border: 1px solid #eef2f8; border-radius: var(--radius);
     padding: 16px 20px; box-shadow: 0 4px 18px rgba(35,60,110,0.03);
@@ -1135,11 +1135,24 @@ h1{
 .stat-value.money { color: var(--primary-strong); }
 .stat .unit { font-size: 13px; color: var(--muted); margin-left: 4px; font-weight: 500; }
 
-/* 存疑单数：第 5 张统计卡，点一下切换「只看存疑」 */
-.stat-flag{cursor:pointer;background:#fffdf8;border-color:#f7e2bf;}
-.stat-flag .stat-icon{background:#fff4e0;color:#d48806;}
-.stat-flag:hover{border-color:#f2cf96;background:#fff9ef;}
-.stat-flag.is-zero{opacity:.7;}
+/* 累计单数卡右侧的「存疑」小块：点一下切换只看存疑 */
+.stat-flagbox{
+    margin-left:auto; flex:0 0 auto;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:5px 11px; border-radius:10px;
+    border:1px solid transparent; background:#f4f6fa; color:#8b95a5;
+    cursor:pointer; user-select:none;
+    transition:background .15s, border-color .15s, color .15s;
+}
+.stat-flagbox .flagbox-num{font-size:19px; font-weight:800; line-height:1.15; letter-spacing:-.3px;}
+.stat-flagbox .flagbox-label{font-size:11px; font-weight:600; letter-spacing:.5px;}
+.stat-flagbox:hover{background:#eaeff7; border-color:#dfe5ee;}
+.stat-flagbox:focus-visible{outline:2px solid #c7d5f8; outline-offset:2px;}
+.stat-flagbox.is-zero{opacity:.45;}
+/* 已勾选「只看存疑」：琥珀选中态 */
+.stat-flagbox.is-on{background:#fff2dc; border-color:#f2cf96; color:#c07a06;}
+.stat-flagbox.is-on .flagbox-label{color:#d4900c;}
+.stat-flagbox.is-on:hover{background:#ffeccd;}
 
 /* ---------- 卡片 ---------- */
 .card{
@@ -1568,14 +1581,12 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 }
 /* ---------- 响应式 ---------- */
 @media (max-width:960px){
-    .stats{grid-template-columns:repeat(3,1fr);}
-    .stat-flag{grid-column:span 2;}   /* 3 列布局下第 5 张补满第二行 */
+    .stats{grid-template-columns:repeat(2,1fr);}
 }
 @media (max-width:600px){
     body{padding:22px 12px 34px;}
     .card{padding:16px 16px 20px;}
     .stats{grid-template-columns:1fr;gap:12px;}
-    .stat-flag{grid-column:auto;}
     .stat{padding:16px 20px;}
     .batch-meta{grid-template-columns:1fr;}
     .field-note-full{grid-column:auto;}
@@ -1710,6 +1721,10 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                     <span class="stat-label">累计单数</span>
                     <strong class="stat-value"><span id="stat-count"><?= $stats['total_count'] ?></span><span class="unit">单</span></strong>
                 </div>
+                <div class="stat-flagbox<?= (int)$stats['flagged_count'] > 0 ? '' : ' is-zero' ?>" id="statFlagBox" tabindex="0" role="button" title="数据存疑，待核对｜点击只看存疑">
+                    <span class="flagbox-num" id="stat-flagged"><?= (int)$stats['flagged_count'] ?></span>
+                    <span class="flagbox-label">存疑</span>
+                </div>
             </div>
             <div class="stat">
                 <div class="stat-icon icon-purple">
@@ -1736,15 +1751,6 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                 <div class="stat-content">
                     <span class="stat-label">本月金额</span>
                     <strong class="stat-value money">￥<span id="stat-month-amount"><?= $stats['month_amount'] ?></span></strong>
-                </div>
-            </div>
-            <div class="stat stat-flag<?= (int)$stats['flagged_count'] > 0 ? '' : ' is-zero' ?>" id="statFlagCard" tabindex="0" role="button" title="点击切换只看存疑">
-                <div class="stat-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6l8.6 15.4H3.4z"></path><line x1="12" y1="9.6" x2="12" y2="14.2"></line><line x1="12" y1="16.8" x2="12" y2="16.9"></line></svg>
-                </div>
-                <div class="stat-content">
-                    <span class="stat-label">存疑单数</span>
-                    <strong class="stat-value"><span id="stat-flagged"><?= (int)$stats['flagged_count'] ?></span><span class="unit">单</span></strong>
                 </div>
             </div>
         </div>
@@ -2166,7 +2172,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     const statMonthCount  = $('stat-month-count');
     const statMonthAmount = $('stat-month-amount');
     const statFlagged     = $('stat-flagged');
-    const statFlagCard    = $('statFlagCard');
+    const statFlagBox     = $('statFlagBox');
 
     /* ============================================================
        5. 筛选条件：日期 / 批发商 / 条件标签
@@ -2233,21 +2239,26 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     });
 
     on(shopFilter, 'change', () => refreshList(1));
-    on(flagFilter, 'change', () => refreshList(1));
+    on(flagFilter, 'change', () => { syncFlagBox(); refreshList(1); });
 
-    /* 点「存疑单数」卡 → 切换「只看存疑」 */
+    /* 「累计单数」卡右侧的存疑小块：点一下切换「只看存疑」，勾选态换样式 */
+    function syncFlagBox() {
+        if (!statFlagBox) return;
+        statFlagBox.classList.toggle('is-on', !!(flagFilter && flagFilter.checked));
+    }
     function toggleFlagFilter() {
         if (!flagFilter) return;
         flagFilter.checked = !flagFilter.checked;
         flagFilter.dispatchEvent(new Event('change', { bubbles: true }));
         scrollToPanel('list');
     }
-    if (statFlagCard) {
-        statFlagCard.addEventListener('click', toggleFlagFilter);
-        statFlagCard.addEventListener('keydown', (e) => {
+    if (statFlagBox) {
+        statFlagBox.addEventListener('click', toggleFlagFilter);
+        statFlagBox.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFlagFilter(); }
         });
     }
+    syncFlagBox();
 
     /* 已生效的筛选条件 → 可单独移除的小标签 */
     function clearDateFilter() {
@@ -2284,6 +2295,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         if (shopFilter) shopFilter.value = '';
         if (flagFilter) flagFilter.checked = false;
         clearDateFilter();
+        syncFlagBox();
         refreshList(1);
     });
 
@@ -3493,7 +3505,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             if (statMonthAmount) statMonthAmount.textContent = d.month_amount;
             if (flagCount)       flagCount.textContent       = d.flagged_count;
             if (statFlagged)     statFlagged.textContent     = d.flagged_count;
-            if (statFlagCard)    statFlagCard.classList.toggle('is-zero', !(d.flagged_count > 0));
+            if (statFlagBox)     statFlagBox.classList.toggle('is-zero', !(d.flagged_count > 0));
         } catch (err) { /* 统计失败不影响主流程 */ }
     }
 
