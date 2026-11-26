@@ -436,8 +436,7 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         // 依然输出标准的 YYYY-MM-DD 格式
         $html .=       '<span class="batch-date js-set-date" title="点击筛选此日期">' . ($b['odate'] !== '' ? highlight($b['odate'], $q) : '未填日期') . '</span>';
         $html .=       '<span class="batch-shop js-set-shop" data-shop="' . h($b['wholesaler']) . '" title="点击筛选此批发商">' . ($b['wholesaler'] !== '' ? highlight($b['wholesaler'], $q) : '<em>未填写批发商</em>') . '</span>';
-        $html .=       ($flagOn ? '<button type="button" class="flag-badge js-unflag" data-id="' . (int)$b['id'] . '" title="点击标记为已复核'
-            . ($flagNote !== '' ? '：' . h($flagNote) : '') . '">待复核</button>' : '');
+        $html .=       ($flagOn ? '<button type="button" class="flag-badge js-flag-filter" data-id="' . (int)$b['id'] . '" title="点击只看待复核；取消标记请到编辑里改">待复核</button>' : '');
         $html .=     '</div>';
         $html .=     '<div class="batch-right">';
         $html .=       '<button type="button" class="btn-mini js-print" data-id="' . (int)$b['id'] . '">打印</button>';
@@ -2308,7 +2307,10 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         if (txt) txt.textContent = isOn ? '取消复核' : '标记复核';
         fFlag.title = isOn ? '已标记待复核，点击取消' : '点击切换是否需要复核';
     }
-    if (fFlag) fFlag.addEventListener('click', () => setFlagOn(fFlag.dataset.on !== '1'));
+    if (fFlag) fFlag.addEventListener('click', async () => {
+        setFlagOn(fFlag.dataset.on !== '1');
+        await submitBatch();          /* 点标记即整单保存，标记随单一起落库 */
+    });
     const itemsBody    = $('itemsBody');
     const addRowBtn    = $('addRow');
     const grandTotalEl = $('grandTotal');
@@ -3310,9 +3312,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     /* ============================================================
        9. 保存进货单
        ============================================================ */
-    on(form, 'submit', async (e) => {
-        e.preventDefault();
-
+    async function submitBatch() {
         /* 填了总价但还没失焦就点保存：先把这些行折算成单价，避免提交旧的单价 */
         for (const tr of (itemsBody ? itemsBody.rows : [])) {
             if (tr.dataset.amt === '1') settleAmountRow(tr);
@@ -3391,6 +3391,11 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             saveBtn.disabled = false;
             saveBtn.textContent = batchIdEl.value ? '保存修改' : '保存进货单';
         }
+    }
+
+    on(form, 'submit', (e) => {
+        e.preventDefault();
+        submitBatch();
     });
 
     /* ============================================================
@@ -3767,16 +3772,15 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             return;
         }
 
-        /* ---- 点「待复核」徽章 → 标记为已复核 ---- */
-        const unflagBtn = e.target.closest('.js-unflag');
-        if (unflagBtn) {
-            try {
-                await callAPI('?ajax=unflag', { id: parseInt(unflagBtn.dataset.id, 10) });
-                toast('已标记为已复核', 'ok');
-                await Promise.all([refreshList(currentPage), refreshStats()]);
-            } catch (err) {
-                toast(err.message || '操作失败', 'error');
+        /* ---- 点「待复核」徽章 → 勾上「只看待复核」，集中呈现待核对单据 ---- */
+        const flagJump = e.target.closest('.js-flag-filter');
+        if (flagJump) {
+            const box = $('flagFilter');
+            if (box && !box.checked) {
+                box.checked = true;
+                box.dispatchEvent(new Event('change', { bubbles: true }));
             }
+            toast('已只看待复核；取消标记请到编辑里改', 'ok');
             return;
         }
 
