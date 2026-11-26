@@ -924,9 +924,8 @@ if ($ajax !== '') {
         $wholesaler = normalizeWholesalerName((string)($data['wholesaler'] ?? ''));
         $odate      = trim((string)($data['odate'] ?? ''));
         $note       = trim((string)($data['note'] ?? ''));
-        /* 「待复核」标记：勾了才算，取消勾选时连说明一起清掉，不留残余 */
+        /* 「待复核」标记：按钮点开才算；原因记在备注里，flag_note 仅作老数据兼容 */
         $flag       = ((int)($data['flag'] ?? 0)) === 1 ? 1 : 0;
-        $flagNote   = $flag === 1 ? trim((string)($data['flag_note'] ?? '')) : '';
         $items      = $data['items'] ?? [];
 
         if ($odate === '') jsonOut(['ok' => false, 'msg' => '请选择进货日期'], 400);
@@ -969,7 +968,6 @@ if ($ajax !== '') {
         /* 截到 60 字后再收一次首尾空白，避免截断处正好落在空格上 */
         $wholesaler = normalizeWholesalerName(mb_substr($wholesaler, 0, 60));
         $note       = mb_substr($note, 0, 200);
-        $flagNote   = mb_substr($flagNote, 0, 100);
 
         try {
             $pdo->beginTransaction();
@@ -981,13 +979,14 @@ if ($ajax !== '') {
                     jsonOut(['ok' => false, 'msg' => '这张进货单已不存在，可能已被删除'], 404);
                 }
 
-                $stmt = $pdo->prepare("UPDATE batches SET wholesaler = :w, odate = :d, note = :n, flag = :f, flag_note = :fn WHERE id = :id");
-                $stmt->execute([':w'=>$wholesaler, ':d'=>$odate, ':n'=>$note, ':f'=>$flag, ':fn'=>$flagNote, ':id'=>$id]);
+                $stmt = $pdo->prepare("UPDATE batches SET wholesaler = :w, odate = :d, note = :n, flag = :f,
+                                       flag_note = CASE WHEN :f = 1 THEN flag_note ELSE '' END WHERE id = :id");
+                $stmt->execute([':w'=>$wholesaler, ':d'=>$odate, ':n'=>$note, ':f'=>$flag, ':id'=>$id]);
                 $pdo->prepare("DELETE FROM items WHERE batch_id = :id")->execute([':id' => $id]);
             } else {
                 $stmt = $pdo->prepare("INSERT INTO batches (wholesaler, odate, note, flag, flag_note, created_at)
-                                       VALUES (:w, :d, :n, :f, :fn, :c)");
-                $stmt->execute([':w'=>$wholesaler, ':d'=>$odate, ':n'=>$note, ':f'=>$flag, ':fn'=>$flagNote, ':c'=>date('Y-m-d H:i:s')]);
+                                       VALUES (:w, :d, :n, :f, '', :c)");
+                $stmt->execute([':w'=>$wholesaler, ':d'=>$odate, ':n'=>$note, ':f'=>$flag, ':c'=>date('Y-m-d H:i:s')]);
                 $id = (int)$pdo->lastInsertId();
             }
 
@@ -1656,6 +1655,16 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 .flag-check{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:#4a5563;user-select:none;font-style:normal;font-weight:500;}
 .flag-check input{width:16px;height:16px;margin:0;cursor:pointer;accent-color:#2f6fed;}
 .flag-check .flag-hint{font-style:normal;font-weight:400;color:#8b97a6;font-size:12px;}
+.flag-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.flag-toggle{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid #d8e0ea;border-radius:8px;
+  background:#fff;color:#5a6879;font-size:13px;font-weight:500;font-family:inherit;cursor:pointer;transition:all .16s;}
+.flag-toggle svg{flex:none;transition:transform .16s;}
+.flag-toggle:hover{border-color:#b9c8da;background:#f7fafd;color:#2f6fed;}
+.flag-toggle.is-on{border-color:#f5c678;background:#fff8ec;color:#8a5300;}
+.flag-toggle.is-on svg{transform:rotate(-8deg) scale(1.05);}
+.flag-toggle:focus-visible{outline:2px solid #2f6fed;outline-offset:2px;}
+.flag-toggle-text{white-space:nowrap;}
+.flag-hint{font-style:normal;font-weight:400;color:#8b97a6;font-size:12px;}
 .flag-num{min-width:20px;padding:0 6px;border-radius:999px;background:#fff4e0;color:#8a5300;font-size:12px;text-align:center;}
 .filter-flag{margin-left:2px;}
 </style>
@@ -1912,12 +1921,14 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                         <input id="f-note" maxlength="200" placeholder="选填，如联系人、结款方式等">
                     </div>
                     <div class="field field-note-full">
-                        <label for="f-flag-note" class="flag-check">
-                            <input type="checkbox" id="f-flag">
-                            <span>标记为待复核</span>
-                            <em class="flag-hint">手写看不清、补录旧单时先勾上，回头能一键筛出来改</em>
-                        </label>
-                        <input id="f-flag-note" maxlength="100" placeholder="说明：字迹不清 / 补录 8 月旧单 …（选填）">
+                        <label>复核标记</label>
+                        <div class="flag-row">
+                            <button type="button" class="flag-toggle" id="f-flag" data-on="0" aria-pressed="false" title="点击切换是否需要复核">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>
+                                <span class="flag-toggle-text">标记待复核</span>
+                            </button>
+                            <em class="flag-hint">手写看不清、补录旧单时点一下，原因写进上面的备注</em>
+                        </div>
                     </div>
                 </div>
 
@@ -2285,7 +2296,19 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     const fOdateNative = $('f-odate-native');
     const fNote        = $('f-note');
     const fFlag        = $('f-flag');
-    const fFlagNote    = $('f-flag-note');
+
+    /* 复核标记：一个图标按钮，点一下切换开/关 */
+    function setFlagOn(onState) {
+        if (!fFlag) return;
+        const isOn = !!onState;
+        fFlag.dataset.on = isOn ? '1' : '0';
+        fFlag.classList.toggle('is-on', isOn);
+        fFlag.setAttribute('aria-pressed', isOn ? 'true' : 'false');
+        const txt = fFlag.querySelector('.flag-toggle-text');
+        if (txt) txt.textContent = isOn ? '待复核 · 点击取消' : '标记待复核';
+        fFlag.title = isOn ? '已标记待复核，点击取消' : '点击切换是否需要复核';
+    }
+    if (fFlag) fFlag.addEventListener('click', () => setFlagOn(fFlag.dataset.on !== '1'));
     const itemsBody    = $('itemsBody');
     const addRowBtn    = $('addRow');
     const grandTotalEl = $('grandTotal');
@@ -3271,8 +3294,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         fOdateNative.value = TODAY;
         markInvalid(fOdateText, false);
         fNote.value        = '';
-        if (fFlag)     fFlag.checked   = false;
-        if (fFlagNote) fFlagNote.value = '';
+        setFlagOn(false);
         itemsBody.innerHTML = '';
         addRow();
         formTitle.textContent = '新增进货单';
@@ -3343,8 +3365,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                 wholesaler: saveWholesaler,
                 odate:      dateRes.iso,
                 note:       fNote.value.trim(),
-                flag:       (fFlag && fFlag.checked) ? 1 : 0,
-                flag_note:  (fFlag && fFlag.checked && fFlagNote) ? fFlagNote.value.trim() : '',
+                flag:       (fFlag && fFlag.dataset.on === '1') ? 1 : 0,
                 items:      items
             });
 
@@ -3779,8 +3800,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                 fOdateText.value   = b.odate || TODAY;
                 fOdateNative.value = b.odate || TODAY;
                 fNote.value        = b.note || '';
-                if (fFlag)     fFlag.checked   = !!b.flag;
-                if (fFlagNote) fFlagNote.value = b.flag_note || '';
+                if (fFlag) setFlagOn(!!b.flag);
                 markInvalid(fOdateText, false);      /* 清掉上一次残留的红框 */
 
                 itemsBody.innerHTML = '';
