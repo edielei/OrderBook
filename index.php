@@ -8,6 +8,10 @@ if (date_default_timezone_get() === 'UTC') {
 }
 $dbFile = __DIR__ . '/orders.sqlite';
 
+/* 批发商筛选的哨兵值：只挑「没填批发商」的单。
+   用一个不可能撞名的串，避免和真实批发商重名 */
+const WH_NONE = '__none__';
+
 try {
     $pdo = new PDO('sqlite:' . $dbFile);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -342,10 +346,14 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         $params[':date'] = $date;
     }
 
-    /* 筛选：批发商 */
+    /* 筛选：批发商（WH_NONE = 只看没填批发商的单，补录旧单时常用来清底） */
     if ($shop !== '') {
-        $cond[] = "b.wholesaler = :shop";
-        $params[':shop'] = $shop;
+        if ($shop === WH_NONE) {
+            $cond[] = "(b.wholesaler IS NULL OR TRIM(b.wholesaler) = '')";
+        } else {
+            $cond[] = "b.wholesaler = :shop";
+            $params[':shop'] = $shop;
+        }
     }
 
     $where = $cond ? (' WHERE ' . implode(' AND ', $cond)) : '';
@@ -1785,7 +1793,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 
                     <div class="filter-item">
                         <select id="shopFilter" class="filter-select">
-                            <option value="">全部批发商</option>
+                            <option value=""<?= $shop === '' ? ' selected' : '' ?>>全部批发商</option>
+                            <option value="<?= h(WH_NONE) ?>"<?= $shop === WH_NONE ? ' selected' : '' ?>>未填写批发商</option>
                             <?php foreach ($wholesalers as $wd): ?>
                             <option value="<?= h($wd['name']) ?>"<?= $wd['name'] === $shop ? ' selected' : '' ?>><?= h($wd['name']) ?></option>
                             <?php endforeach; ?>
@@ -2024,6 +2033,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
        1. 基础常量与工具
        ============================================================ */
     const TODAY = '<?= $today ?>';
+    /* 批发商筛选的「未填写」哨兵，与后端 WH_NONE 同一来源 */
+    const WH_NONE = '<?= WH_NONE ?>';
 
     let currentPage = <?= (int)$page ?>;
     let currentPer  = <?= (int)$perPage ?>;
@@ -2286,7 +2297,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         const shop = shopFilter ? shopFilter.value : '';
         const date = dateFilterText ? dateFilterText.value.trim() : '';
         const chips = [];
-        if (shop) chips.push({ k: 'shop', label: '批发商：' + shop });
+        if (shop) chips.push({ k: 'shop', label: '批发商：' + (shop === WH_NONE ? '未填写' : shop) });
         if (date) chips.push({ k: 'date', label: '日期：' + date });
 
         if (!chips.length) {
@@ -4075,7 +4086,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     function renderShopOptions() {
         if (shopFilter) {
             const cur = shopFilter.value;
-            const opts = ['<option value="">全部批发商</option>'].concat(
+            const opts = ['<option value="">全部批发商</option>',
+                          '<option value="' + esc(WH_NONE) + '">未填写批发商</option>'].concat(
                 shopData.map((w) => '<option value="' + esc(w.name) + '">' + esc(w.name) + '</option>')
             );
             shopFilter.innerHTML = opts.join('');
