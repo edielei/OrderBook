@@ -1092,7 +1092,7 @@ h1{
 .icon-blue { background: #eff4ff; color: var(--primary); }
 .icon-purple { background: #f5f0ff; color: #8a6cf5; }
 .icon-green { background: #eefbf4; color: #1f8a4c; }
-.icon-orange { background: #fff8eb; color: #d48806; }
+.icon-rose { background: #fdeef3; color: #b0265a; }
 .stat-content { display: flex; flex-direction: column; justify-content: center; }
 .stat-label { font-size: 13px; color: var(--muted); font-weight: 500; margin-bottom: 2px; letter-spacing: 0.5px; }
 .stat-value { font-size: 22px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.2; }
@@ -1505,6 +1505,9 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 #printArea {
     width: 100%;
     max-width: 100%;
+    box-sizing: border-box;
+    /* 留 1px 余量：表格右边框正好压在页面内容边界时，打印缩放会把它抹成半像素灰线 */
+    padding: 0 1px;
     color: #000;
     font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
 }
@@ -1512,17 +1515,26 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 #printArea .print-header h2 { font-size: 24px; margin: 0; letter-spacing: 4px; }
 #printArea .print-meta { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 14px; border-bottom: 1px solid #000; padding-bottom: 6px; }
 #printArea .print-meta div { line-height: 1.8; }
-#printArea .print-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 13px; table-layout: auto; }
+/* 固定列宽：总宽精确等于内容宽，右边框不会被挤到页面外，也不会被裁成半像素 */
+#printArea .print-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 13px; table-layout: fixed; border: 1px solid #000; }
 #printArea .print-table th,
-#printArea .print-table td { border: 1px solid #000; padding: 7px 10px; text-align: left; white-space: nowrap; }
+#printArea .print-table td { border: 1px solid #000; padding: 7px 10px; text-align: left; white-space: nowrap; overflow: hidden; }
 /* 行不要跨页断开，避免最后一行被硬拆到第二页 */
 #printArea .print-table tr { page-break-inside: avoid; break-inside: avoid; }
+#printArea .print-table th:nth-child(1),
+#printArea .print-table td:nth-child(1) { width: 34px; }
 /* 其余列按内容自适应，商品名称列吃掉剩余宽度（不参与自适应，避免把数字列撑宽/挤窄） */
 #printArea .print-table th:nth-child(2),
-#printArea .print-table td:nth-child(2) { width: 100%; white-space: normal; }
+#printArea .print-table td:nth-child(2) { white-space: normal; word-break: break-word; }
 /* 单位列内容短，居中更整齐 */
 #printArea .print-table th:nth-child(3),
-#printArea .print-table td:nth-child(3) { text-align: center; }
+#printArea .print-table td:nth-child(3) { width: 54px; text-align: center; }
+#printArea .print-table th:nth-child(4),
+#printArea .print-table td:nth-child(4) { width: 62px; }
+#printArea .print-table th:nth-child(5),
+#printArea .print-table td:nth-child(5) { width: 76px; }
+#printArea .print-table th:nth-child(6),
+#printArea .print-table td:nth-child(6) { width: 92px; }
 #printArea .print-table th { background: #f5f5f5 !important; font-weight: 600; }
 #printArea .print-table .num { text-align: right; }
 #printArea .print-table .sp { font-size: 11px; font-weight: 400; color: #444; margin-left: 2px; }
@@ -1718,8 +1730,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                 </div>
             </div>
             <div class="stat">
-                <div class="stat-icon icon-orange">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                <div class="stat-icon icon-rose">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z"></path><line x1="8" y1="7" x2="16" y2="7"></line><line x1="8" y1="11" x2="16" y2="11"></line><line x1="8" y1="15" x2="13" y2="15"></line></svg>
                 </div>
                 <div class="stat-content">
                     <span class="stat-label">本月金额</span>
