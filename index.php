@@ -436,10 +436,7 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         // 依然输出标准的 YYYY-MM-DD 格式
         $html .=       '<span class="batch-date js-set-date" title="点击筛选此日期">' . ($b['odate'] !== '' ? highlight($b['odate'], $q) : '未填日期') . '</span>';
         $html .=       '<span class="batch-shop js-set-shop" data-shop="' . h($b['wholesaler']) . '" title="点击筛选此批发商">' . ($b['wholesaler'] !== '' ? highlight($b['wholesaler'], $q) : '<em>未填写批发商</em>') . '</span>';
-        $flagTip = '数据存疑，待核对'
-            . ((string)$b['note'] !== '' ? '（备注：' . mb_substr((string)$b['note'], 0, 40) . '）' : '')
-            . '；核对无误后可在编辑里取消标记';
-        $html .=       ($flagOn ? '<span class="flag-badge" title="' . h($flagTip) . '">存疑</span>' : '');
+        $html .=       ($flagOn ? '<span class="flag-badge" title="数据存疑，待核对">存疑</span>' : '');
         $html .=     '</div>';
         $html .=     '<div class="batch-right">';
         $html .=       '<button type="button" class="btn-mini js-print" data-id="' . (int)$b['id'] . '">打印</button>';
