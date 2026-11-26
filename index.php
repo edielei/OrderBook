@@ -1934,7 +1934,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                 <div class="batch-meta">
                     <div class="field">
                         <label for="f-wholesaler">批发商</label>
-                        <input id="f-wholesaler" list="wholesalerOptions" maxlength="60" placeholder="输入或从已管理的批发商中选择">
+                        <input id="f-wholesaler" list="wholesalerOptions" maxlength="60" placeholder="输入名称，或选已有批发商">
                         <datalist id="wholesalerOptions">
                             <?php foreach ($wholesalers as $wd): ?>
                             <option value="<?= h($wd['name']) ?>"></option>
@@ -1953,7 +1953,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                     </div>
                     <div class="field field-note-full">
                         <label for="f-note">备注</label>
-                        <input id="f-note" maxlength="200" placeholder="选填，如联系人、结款方式等">
+                        <input id="f-note" maxlength="200" placeholder="选填，如送货人、结款情况、存疑原因">
                     </div>
                     <div class="field field-note-full">
                         <label>存疑标记</label>
