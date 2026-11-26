@@ -1104,7 +1104,7 @@ h1{
 .icon-blue { background: #eff4ff; color: var(--primary); }
 .icon-purple { background: #f5f0ff; color: #8a6cf5; }
 .icon-green { background: #eefbf4; color: #1f8a4c; }
-.icon-rose { background: #fdeef3; color: #b0265a; }
+.icon-teal { background: #e7f4fa; color: #0e7490; }
 .stat-content { display: flex; flex-direction: column; justify-content: center; }
 .stat-label { font-size: 13px; color: var(--muted); font-weight: 500; margin-bottom: 2px; letter-spacing: 0.5px; }
 .stat-value { font-size: 22px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.2; }
@@ -1769,7 +1769,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                 </div>
             </div>
             <div class="stat">
-                <div class="stat-icon icon-rose">
+                <div class="stat-icon icon-teal">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z"></path><line x1="8" y1="7" x2="16" y2="7"></line><line x1="8" y1="11" x2="16" y2="11"></line><line x1="8" y1="15" x2="13" y2="15"></line></svg>
                 </div>
                 <div class="stat-content">
