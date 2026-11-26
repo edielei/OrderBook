@@ -436,7 +436,7 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         // 依然输出标准的 YYYY-MM-DD 格式
         $html .=       '<span class="batch-date js-set-date" title="点击筛选此日期">' . ($b['odate'] !== '' ? highlight($b['odate'], $q) : '未填日期') . '</span>';
         $html .=       '<span class="batch-shop js-set-shop" data-shop="' . h($b['wholesaler']) . '" title="点击筛选此批发商">' . ($b['wholesaler'] !== '' ? highlight($b['wholesaler'], $q) : '<em>未填写批发商</em>') . '</span>';
-        $html .=       ($flagOn ? '<button type="button" class="flag-badge js-flag-filter" data-id="' . (int)$b['id'] . '" title="点击只看待复核；取消标记请到编辑里改">待复核</button>' : '');
+        $html .=       ($flagOn ? '<span class="flag-badge">待复核</span>' : '');
         $html .=     '</div>';
         $html .=     '<div class="batch-right">';
         $html .=       '<button type="button" class="btn-mini js-print" data-id="' . (int)$b['id'] . '">打印</button>';
@@ -1647,8 +1647,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 /* ---- 待复核标记 ---- */
 .flag-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;padding:2px 9px;border-radius:999px;
     font-size:12px;line-height:18px;color:#8a5300;background:#fff4e0;border:1px solid #ffd79a;white-space:nowrap;vertical-align:middle;
-    font-family:inherit;cursor:pointer;}
-.flag-badge:hover{background:#ffe9c8;border-color:#f5c678;}
+    font-family:inherit;cursor:default;user-select:none;}
 .flag-badge::before{content:"";width:6px;height:6px;border-radius:50%;background:#f5a524;}
 .flag-note{display:inline-block;margin-left:10px;padding:1px 7px;border-radius:6px;font-size:12px;color:#8a5300;background:#fff8ec;border:1px solid #ffe7bf;}
 .flag-check{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:#4a5563;user-select:none;font-style:normal;font-weight:500;}
@@ -2226,7 +2225,6 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         const chips = [];
         if (shop) chips.push({ k: 'shop', label: '批发商：' + shop });
         if (date) chips.push({ k: 'date', label: '日期：' + date });
-        if (flagFilter && flagFilter.checked) chips.push({ k: 'flag', label: '只看待复核' });
 
         if (!chips.length) {
             filterChips.innerHTML = '';
@@ -2242,7 +2240,6 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         if (!x) return;
         if (x.dataset.chip === 'shop' && shopFilter) shopFilter.value = '';
         if (x.dataset.chip === 'date') clearDateFilter();
-        if (x.dataset.chip === 'flag' && flagFilter) flagFilter.checked = false;
         refreshList(1);
     });
 
@@ -3772,17 +3769,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             return;
         }
 
-        /* ---- 点「待复核」徽章 → 勾上「只看待复核」，集中呈现待核对单据 ---- */
-        const flagJump = e.target.closest('.js-flag-filter');
-        if (flagJump) {
-            const box = $('flagFilter');
-            if (box && !box.checked) {
-                box.checked = true;
-                box.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-            toast('已只看待复核；取消标记请到编辑里改', 'ok');
-            return;
-        }
+        /* ---- 点「待复核」徽章不再有任何动作，纯标记展示 ---- */
 
         /* ---- 打印 ---- */
         const printBtn = e.target.closest('.js-print');
