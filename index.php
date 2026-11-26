@@ -2308,10 +2308,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         if (txt) txt.textContent = isOn ? '取消复核' : '标记复核';
         fFlag.title = isOn ? '当前：已标记待复核，点击取消' : '当前：未标记，点击标记待复核';
     }
-    if (fFlag) fFlag.addEventListener('click', async () => {
-        setFlagOn(fFlag.dataset.on !== '1');
-        await submitBatch();          /* 点标记即整单保存，标记随单一起落库 */
-    });
+    if (fFlag) fFlag.addEventListener('click', () => setFlagOn(fFlag.dataset.on !== '1'));
     const itemsBody    = $('itemsBody');
     const addRowBtn    = $('addRow');
     const grandTotalEl = $('grandTotal');
