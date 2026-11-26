@@ -157,6 +157,7 @@ function getStats(PDO $pdo): array {
     $tot = $pdo->query("SELECT
                             (SELECT COUNT(*) FROM batches) AS c,
                             (SELECT COUNT(*) FROM batches WHERE flag = 1) AS f,
+                            (SELECT COUNT(*) FROM batches WHERE TRIM(COALESCE(wholesaler, '')) = '') AS e,
                             (SELECT COALESCE(SUM(qty * price), 0) FROM items) AS s")->fetch();
 
     $mStart = date('Y-m-01');
@@ -173,6 +174,7 @@ function getStats(PDO $pdo): array {
     return [
         'total_count'  => (int)$tot['c'],
         'flagged_count' => (int)$tot['f'],
+        'empty_wh_count' => (int)$tot['e'],
         'total_amount' => number_format((float)$tot['s'], 2),
         'month_count'  => (int)$mon['c'],
         'month_amount' => number_format((float)$mon['s'], 2),
@@ -1022,6 +1024,8 @@ $wholesalers = getWholesalerNames($pdo);
 $q        = qParam('q', 60);
 $date     = normalizeDate(trim($_GET['d'] ?? '')) ?? '';   /* 非法日期一律视为未筛选 */
 $shop     = qParam('w', 60);
+/* 库里一条未填批发商的单都没有时，这个筛选项不成立，按未筛选处理 */
+if ($shop === WH_NONE && (int)$stats['empty_wh_count'] === 0) $shop = '';
 $page     = max(1, (int)($_GET['page'] ?? 1));
 $perPage  = max(1, min(200, (int)($_GET['per'] ?? 10)));
 $listHtml = renderList($pdo, $q, $date, $shop, $page, $perPage, isset($_GET['f']) && $_GET['f'] === '1');
@@ -1794,7 +1798,9 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                     <div class="filter-item">
                         <select id="shopFilter" class="filter-select">
                             <option value=""<?= $shop === '' ? ' selected' : '' ?>>全部批发商</option>
+                            <?php if ((int)$stats['empty_wh_count'] > 0): ?>
                             <option value="<?= h(WH_NONE) ?>"<?= $shop === WH_NONE ? ' selected' : '' ?>>未填写批发商</option>
+                            <?php endif; ?>
                             <?php foreach ($wholesalers as $wd): ?>
                             <option value="<?= h($wd['name']) ?>"<?= $wd['name'] === $shop ? ' selected' : '' ?>><?= h($wd['name']) ?></option>
                             <?php endforeach; ?>
@@ -2035,6 +2041,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     const TODAY = '<?= $today ?>';
     /* 批发商筛选的「未填写」哨兵，与后端 WH_NONE 同一来源 */
     const WH_NONE = '<?= WH_NONE ?>';
+    /* 未填批发商的单数：为 0 时筛选下拉不出现「未填写批发商」这一项 */
+    let emptyWhCount = <?= (int)$stats['empty_wh_count'] ?>;
 
     let currentPage = <?= (int)$page ?>;
     let currentPer  = <?= (int)$perPage ?>;
@@ -3624,6 +3632,16 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                 const has = d.flagged_count > 0;
                 statFlagBox.style.display = has ? '' : 'none';
             }
+            /* 未填写批发商的单数变了：下拉里的这一项要跟着出现/消失。
+               如果当前正用它筛选而已经筛空了，把条件摘掉，免得盯着空列表 */
+            if (typeof d.empty_wh_count === 'number' && d.empty_wh_count !== emptyWhCount) {
+                emptyWhCount = d.empty_wh_count;
+                if (emptyWhCount === 0 && shopFilter && shopFilter.value === WH_NONE) {
+                    shopFilter.value = '';
+                    refreshList(1);
+                }
+                renderShopOptions();
+            }
         } catch (err) { /* 统计失败不影响主流程 */ }
     }
 
@@ -4086,10 +4104,13 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     function renderShopOptions() {
         if (shopFilter) {
             const cur = shopFilter.value;
-            const opts = ['<option value="">全部批发商</option>',
-                          '<option value="' + esc(WH_NONE) + '">未填写批发商</option>'].concat(
-                shopData.map((w) => '<option value="' + esc(w.name) + '">' + esc(w.name) + '</option>')
-            );
+            const opts = ['<option value="">全部批发商</option>'];
+            if (emptyWhCount > 0) {
+                opts.push('<option value="' + esc(WH_NONE) + '">未填写批发商</option>');
+            }
+            shopData.forEach((w) => {
+                opts.push('<option value="' + esc(w.name) + '">' + esc(w.name) + '</option>');
+            });
             shopFilter.innerHTML = opts.join('');
             shopFilter.value = cur;
         }
