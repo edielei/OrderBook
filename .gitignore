@@ -6,6 +6,10 @@
 *.db
 *.bak
 
+# 单据附件的原始文件（属于本地数据，不进仓库）
+files/
+.check.js
+
 # 系统垃圾
 Thumbs.db
 desktop.ini

@@ -54,6 +54,20 @@ try {
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_batches_wh ON batches(wholesaler, odate)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_items_name ON items(name)");
 
+    /* 单据附件：照片、CSV、Excel 等原样留档，方便事后核对那张手写单 */
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS attachments (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id   INTEGER NOT NULL,
+            orig_name  TEXT NOT NULL DEFAULT '',
+            stored     TEXT NOT NULL DEFAULT '',
+            mime       TEXT NOT NULL DEFAULT '',
+            size       INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT ''
+        )
+    ");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_att_batch ON attachments(batch_id)");
+
     /* 每次启动顺手把批发商名的首尾空白清一遍（有可疑数据才真的动表），
        让「档案里的名字」和「进货单里存的名字」始终是同一个口径 */
     normalizeWholesalerData($pdo);
@@ -146,6 +160,73 @@ function bodyJson(): ?array {
 /* 取查询参数：去首尾空白并截断到 $max 个字（超长关键词会拖慢 SQL 与正则） */
 function qParam(string $key, int $max = 60): string {
     return mb_substr(trim((string)($_GET[$key] ?? '')), 0, $max);
+}
+
+/* ---------- 单据附件 ---------- */
+/* 附件与数据库同目录：files/。整个目录跟着程序走，备份时一起拷 */
+function fileStore(): string {
+    $dir = __DIR__ . '/files';
+    if (!is_dir($dir)) @mkdir($dir, 0777, true);
+    return $dir;
+}
+
+function attAllowedExt(): array {
+    return ['jpg','jpeg','png','gif','webp','bmp','heic','heif','pdf','csv','xls','xlsx','txt','doc','docx','zip'];
+}
+
+/* 原文件名只用来显示：去掉路径与控制字符，保留中文，截到 120 字 */
+function attCleanName(string $name): string {
+    $name = str_replace(['\\', '/', "\0"], '', $name);
+    $name = preg_replace('/[\x00-\x1F\x7F]/u', '', $name) ?? $name;
+    $name = trim($name);
+    return mb_substr($name, 0, 120);
+}
+
+function attExt(string $name): string {
+    return strtolower(pathinfo($name, PATHINFO_EXTENSION));
+}
+
+function attMime(string $ext, string $path): string {
+    $map = [
+        'jpg'=>'image/jpeg', 'jpeg'=>'image/jpeg', 'png'=>'image/png', 'gif'=>'image/gif',
+        'webp'=>'image/webp', 'bmp'=>'image/bmp', 'heic'=>'image/heic', 'heif'=>'image/heif',
+        'pdf'=>'application/pdf', 'csv'=>'text/csv', 'txt'=>'text/plain',
+        'xls'=>'application/vnd.ms-excel',
+        'xlsx'=>'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'doc'=>'application/msword',
+        'docx'=>'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'zip'=>'application/zip',
+    ];
+    if (isset($map[$ext])) return $map[$ext];
+    if (function_exists('mime_content_type')) {
+        $m = @mime_content_type($path);
+        if (is_string($m) && $m !== '') return $m;
+    }
+    return 'application/octet-stream';
+}
+
+function attList(PDO $pdo, int $batchId): array {
+    $stmt = $pdo->prepare("SELECT id, orig_name, mime, size FROM attachments WHERE batch_id = :b ORDER BY id");
+    $stmt->execute([':b' => $batchId]);
+    $out = [];
+    foreach ($stmt->fetchAll() as $r) {
+        /* 只把浏览器真能显示的格式当图片；heic 这类浏览器多半打不开，按文件条目列出更稳 */
+        $img = in_array(attExt((string)$r['orig_name']), ['jpg','jpeg','png','gif','webp','bmp'], true);
+        $out[] = [
+            'id'   => (int)$r['id'],
+            'name' => (string)$r['orig_name'],
+            'size' => (int)$r['size'],
+            'mime' => (string)$r['mime'],
+            'img'  => $img,
+        ];
+    }
+    return $out;
+}
+
+function fmtSize(int $bytes): string {
+    if ($bytes < 1024) return $bytes . ' B';
+    if ($bytes < 1048576) return round($bytes / 1024, 1) . ' KB';
+    return round($bytes / 1048576, 1) . ' MB';
 }
 
 function getStats(PDO $pdo): array {
@@ -385,6 +466,14 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         $items[$it['batch_id']][] = $it;
     }
 
+    /* 每张单的附件数量：一张单一个数字，列表里点开才去拉具体文件 */
+    $attCnt = [];
+    $stmt = $pdo->prepare("SELECT batch_id, COUNT(*) AS c FROM attachments WHERE batch_id IN ($in) GROUP BY batch_id");
+    $stmt->execute($ids);
+    foreach ($stmt->fetchAll() as $r) {
+        $attCnt[(int)$r['batch_id']] = (int)$r['c'];
+    }
+
     $html = '';
     foreach ($batches as $b) {
         $list  = $items[$b['id']] ?? [];
@@ -405,6 +494,7 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         $html .=       ($flagOn ? '<span class="flag-badge" title="数据存疑，待核对">存疑</span>' : '');
         $html .=     '</div>';
         $html .=     '<div class="batch-right">';
+        $html .=       '<button type="button" class="btn-mini js-md" data-id="' . (int)$b['id'] . '" title="把这张单复制成 Markdown 文本">复制</button>';
         $html .=       '<button type="button" class="btn-mini js-print" data-id="' . (int)$b['id'] . '">打印</button>';
         $html .=       '<button type="button" class="btn-mini js-edit" data-id="' . (int)$b['id'] . '">编辑</button>';
         $html .=       '<button type="button" class="btn-mini danger js-del" data-id="' . (int)$b['id'] . '">删除</button>';
@@ -442,6 +532,12 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         $html .=     '<span class="batch-note">'
             . ($b['note'] !== '' ? '备注：' . highlight($b['note'], $q) : '')
             . '</span>';
+        if (!empty($attCnt[(int)$b['id']])) {
+            $n = (int)$attCnt[(int)$b['id']];
+            $html .= '<button type="button" class="attach-chip js-files" data-id="' . (int)$b['id'] . '" title="点击展开附件">'
+                . '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>'
+                . $n . '</button>';
+        }
         $html .=     '<div class="batch-summary">'
             . '<span class="batch-qty">合计数量 <strong>' . fmtNum($totalQty) . '</strong></span>'
             . '<span class="batch-divider">|</span>'
@@ -880,6 +976,114 @@ if ($ajax !== '') {
         jsonOut(['ok' => true, 'batch' => $b]);
     }
 
+    /* ---------- 附件：上传 / 列出 / 取文件 / 删除 ---------- */
+    if ($ajax === 'upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $batchId = (int)($_POST['batch_id'] ?? 0);
+        if ($batchId <= 0) jsonOut(['ok' => false, 'msg' => '参数错误'], 400);
+        $chk = $pdo->prepare("SELECT id FROM batches WHERE id = :id");
+        $chk->execute([':id' => $batchId]);
+        if (!$chk->fetch()) jsonOut(['ok' => false, 'msg' => '这张进货单已不存在'], 404);
+
+        $files = $_FILES['files'] ?? null;
+        if (!$files || !isset($files['name'])) jsonOut(['ok' => false, 'msg' => '没有收到文件'], 400);
+
+        $dir = fileStore();
+        if (!is_dir($dir) || !is_writable($dir)) {
+            jsonOut(['ok' => false, 'msg' => '附件目录不可写：files/'], 500);
+        }
+
+        $names = is_array($files['name']) ? $files['name'] : [$files['name']];
+        $tmps  = is_array($files['tmp_name']) ? $files['tmp_name'] : [$files['tmp_name']];
+        $sizes = is_array($files['size']) ? $files['size'] : [$files['size']];
+        $errs  = is_array($files['error']) ? $files['error'] : [$files['error']];
+
+        $allowed = attAllowedExt();
+        $maxEach = 20 * 1024 * 1024;          /* 单文件 20MB；请求总量受 php.ini 的 post_max_size 约束 */
+        $created = [];
+        $skipped = [];
+
+        foreach ($names as $i => $rawName) {
+            $err = (int)($errs[$i] ?? UPLOAD_ERR_NO_FILE);
+            if ($err === UPLOAD_ERR_NO_FILE) continue;
+            $orig = attCleanName((string)$rawName);
+            if ($err !== UPLOAD_ERR_OK) { $skipped[] = ($orig ?: '未命名文件') . '（上传失败，错误码 ' . $err . '）'; continue; }
+
+            $tmp  = (string)($tmps[$i] ?? '');
+            $size = (int)($sizes[$i] ?? 0);
+            $ext  = attExt($orig);
+
+            if ($orig === '' || !in_array($ext, $allowed, true)) { $skipped[] = ($orig ?: '未命名文件') . '（类型不支持）'; continue; }
+            if ($size <= 0) { $skipped[] = $orig . '（空文件）'; continue; }
+            if ($size > $maxEach) { $skipped[] = $orig . '（超过 20MB）'; continue; }
+            if (!is_file($tmp)) { $skipped[] = $orig . '（临时文件丢失）'; continue; }
+            /* 图片额外验一次真身，防止改了扩展名的非图片混进来 */
+            if (in_array($ext, ['jpg','jpeg','png','gif','webp','bmp'], true) && @getimagesize($tmp) === false) {
+                $skipped[] = $orig . '（不是有效图片）';
+                continue;
+            }
+
+            $stored = 'b' . $batchId . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+            $dest   = $dir . '/' . $stored;
+            $moved  = @move_uploaded_file($tmp, $dest);
+            if (!$moved && @rename($tmp, $dest)) $moved = true;   /* 个别环境临时目录跨盘，rename 兜底 */
+            if (!$moved) { $skipped[] = $orig . '（写入磁盘失败）'; continue; }
+
+            $ins = $pdo->prepare("INSERT INTO attachments (batch_id, orig_name, stored, mime, size, created_at)
+                                  VALUES (:b, :o, :s, :m, :z, :c)");
+            $ins->execute([
+                ':b' => $batchId, ':o' => $orig, ':s' => $stored,
+                ':m' => attMime($ext, $dest), ':z' => $size, ':c' => date('Y-m-d H:i:s'),
+            ]);
+            $created[] = ['id' => (int)$pdo->lastInsertId(), 'name' => $orig, 'size' => $size];
+        }
+
+        jsonOut(['ok' => true, 'created' => $created, 'skipped' => $skipped]);
+    }
+
+    if ($ajax === 'files') {
+        $id = (int)($_GET['id'] ?? 0);
+        jsonOut(['ok' => true, 'files' => attList($pdo, $id)]);
+    }
+
+    /* 取附件本体：图片与 PDF 直接内联，其它按原文件名下载 */
+    if ($ajax === 'file') {
+        $fid = (int)($_GET['fid'] ?? 0);
+        $stmt = $pdo->prepare("SELECT * FROM attachments WHERE id = :id");
+        $stmt->execute([':id' => $fid]);
+        $f = $stmt->fetch();
+        if (!$f) { http_response_code(404); header('Content-Type: text/plain; charset=utf-8'); echo '附件不存在'; exit; }
+
+        $path = fileStore() . '/' . $f['stored'];
+        if (!is_file($path)) { http_response_code(404); header('Content-Type: text/plain; charset=utf-8'); echo '附件文件已丢失'; exit; }
+
+        $mime = (string)$f['mime'] ?: 'application/octet-stream';
+        $inline = strncmp($mime, 'image/', 6) === 0 || $mime === 'application/pdf' || $mime === 'text/plain';
+        header('Content-Type: ' . $mime);
+        header('Content-Length: ' . filesize($path));
+        header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment')
+               . "; filename*=UTF-8''" . rawurlencode((string)$f['orig_name']));
+        header('X-Content-Type-Options: nosniff');
+        header('Cache-Control: private, max-age=86400');
+        readfile($path);
+        exit;
+    }
+
+    if ($ajax === 'del_file' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $data = bodyJson() ?? [];
+        $fid  = (int)($data['fid'] ?? 0);
+        if ($fid <= 0) jsonOut(['ok' => false, 'msg' => '参数错误'], 400);
+
+        $stmt = $pdo->prepare("SELECT * FROM attachments WHERE id = :id");
+        $stmt->execute([':id' => $fid]);
+        $f = $stmt->fetch();
+        if (!$f) jsonOut(['ok' => false, 'msg' => '附件不存在'], 404);
+
+        $pdo->prepare("DELETE FROM attachments WHERE id = :id")->execute([':id' => $fid]);
+        $p = fileStore() . '/' . $f['stored'];
+        if (is_file($p)) @unlink($p);
+        jsonOut(['ok' => true]);
+    }
+
     if ($ajax === 'save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $data = bodyJson();
         if ($data === null) jsonOut(['ok' => false, 'msg' => '数据格式错误'], 400);
@@ -978,11 +1182,22 @@ if ($ajax !== '') {
         if ($id <= 0) jsonOut(['ok' => false, 'msg' => '参数错误'], 400);
 
         try {
+            /* 附件一并清掉：先记下物理文件名，删完库记录再删盘上的文件 */
+            $af = $pdo->prepare("SELECT stored FROM attachments WHERE batch_id = :id");
+            $af->execute([':id' => $id]);
+            $attachFiles = array_column($af->fetchAll(), 'stored');
+
             $pdo->beginTransaction();
+            $pdo->prepare("DELETE FROM attachments WHERE batch_id = :id")->execute([':id' => $id]);
             $pdo->prepare("DELETE FROM items WHERE batch_id = :id")->execute([':id' => $id]);
             $stmt = $pdo->prepare("DELETE FROM batches WHERE id = :id");
             $stmt->execute([':id' => $id]);
             $pdo->commit();
+
+            foreach ($attachFiles as $sf) {
+                $p = fileStore() . '/' . $sf;
+                if (is_file($p)) @unlink($p);
+            }
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             jsonOut(['ok' => false, 'msg' => '删除失败：' . $e->getMessage()], 500);
@@ -1231,6 +1446,31 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
     display:inline-flex;align-items:center;justify-content:center;
 }
 .row-del:hover{border-color:#ffc9cf;color:var(--danger);background:#fff5f6;}
+
+/* ---------- 单据附件 ---------- */
+.attach-box{margin-top:18px;border-top:1px dashed var(--line);padding-top:16px;}
+.attach-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
+.attach-head h3{margin:0;font-size:14px;color:#22314a;}
+.attach-head .attach-hint{flex:1;font-style:normal;font-size:12px;color:var(--muted-light);min-width:180px;}
+.attach-list{display:flex;flex-wrap:wrap;gap:10px;}
+.attach-empty{font-size:12.5px;color:#a8b3c4;padding:4px 2px;}
+.attach-item{position:relative;display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff;max-width:270px;transition:.16s;}
+.attach-item:hover{border-color:#c3d4ff;box-shadow:0 4px 12px rgba(79,110,247,.08);}
+.attach-item .att-thumb{width:40px;height:40px;border-radius:8px;object-fit:cover;background:#f3f6fb;flex:none;border:1px solid #eef2f8;}
+.attach-item .att-ic{width:40px;height:40px;border-radius:8px;background:#eef3ff;color:#4f6ef7;display:flex;align-items:center;justify-content:center;flex:none;font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;}
+.attach-item .att-meta{min-width:0;}
+.attach-item .att-name{display:block;font-size:12.5px;color:#2b3a52;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:168px;}
+.attach-item .att-size{display:block;font-size:11px;color:#9aa8bd;margin-top:2px;}
+.attach-item .att-x{width:22px;height:22px;border:none;border-radius:7px;background:transparent;color:#a8b3c4;cursor:pointer;flex:none;font-size:15px;line-height:1;font-family:inherit;}
+.attach-item .att-x:hover{background:#fff2f3;color:#e5484d;}
+.attach-chip{margin-right:auto;display:inline-flex;align-items:center;gap:4px;border:1px solid #dbe6ff;background:#f4f8ff;color:#3f68e8;border-radius:8px;padding:3px 8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:.16s;}
+.attach-chip:hover{background:#e9f1ff;border-color:#c3d4ff;}
+.batch-files{display:flex;flex-wrap:wrap;gap:10px;padding:2px 16px 14px;background:#fcfdff;}
+.batch-file{display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--line);border-radius:9px;background:#fff;font-size:12.5px;color:#44536b;text-decoration:none;max-width:280px;transition:.16s;}
+.batch-file:hover{border-color:#c3d4ff;background:#f6f9ff;color:var(--primary-strong);}
+.batch-file img{width:32px;height:32px;object-fit:cover;border-radius:6px;flex:none;border:1px solid #eef2f8;}
+.batch-file .bf-ext{width:32px;height:32px;border-radius:6px;background:#eef3ff;color:#4f6ef7;display:flex;align-items:center;justify-content:center;flex:none;font-size:10px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;}
+.batch-file .bf-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
 .form-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:18px;flex-wrap:wrap;}
 .total-box{font-size:14px;color:#54637a;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;}
@@ -1950,6 +2190,17 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                         </thead>
                         <tbody id="itemsBody"></tbody>
                     </table>
+                </div>
+
+                <div class="attach-box">
+                    <div class="attach-head">
+                        <h3>附件</h3>
+                        <em class="attach-hint">图片、CSV、Excel，可多选，单个 ≤ 20MB</em>
+                        <button type="button" class="btn btn-soft" id="pickFiles">＋ 添加文件</button>
+                    </div>
+                    <input type="file" id="fileInput" multiple hidden
+                           accept="image/*,.csv,.xls,.xlsx,.pdf,.txt,.doc,.docx,.zip">
+                    <div class="attach-list" id="attachList"></div>
                 </div>
 
                 <div class="form-footer">
@@ -3374,6 +3625,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         markInvalid(fOdateText, false);
         fNote.value        = '';
         setFlagOn(false);
+        clearAttach();
         itemsBody.innerHTML = '';
         addRow();
         formTitle.textContent = '新增进货单';
@@ -3384,6 +3636,167 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     on(cancelBtn, 'click', () => {
         resetForm();
         switchTab('list');
+    });
+
+    /* ============================================================
+       8.5 单据附件：照片 / CSV / Excel
+       已入库的走 ?ajax=file 取图；新建单还没 id 的，先在待传队列里预览，
+       保存成功后再自动补传，不用先存一遍再回来传
+       ============================================================ */
+    const pickFiles  = $('pickFiles');
+    const fileInput  = $('fileInput');
+    const attachList = $('attachList');
+
+    let attachSaved = [];   /* [{ id, name, size, img, url }] */
+    let attachPend  = [];   /* [{ key, file, name, size, url }] */
+    let attachBusy  = false;
+
+    function fmtSizeJs(b) {
+        if (b < 1024) return b + ' B';
+        if (b < 1048576) return (Math.round(b / 1024 * 10) / 10) + ' KB';
+        return (Math.round(b / 1048576 * 10) / 10) + ' MB';
+    }
+
+    function extOf(name) {
+        const m = /\.([A-Za-z0-9]+)$/.exec(name || '');
+        return m ? m[1].toLowerCase() : 'file';
+    }
+
+    function isImgName(name) {
+        return /\.(jpe?g|png|gif|webp|bmp|heic|heif)$/i.test(name || '');
+    }
+
+    function attachItemHtml(o) {
+        const thumb = o.img && o.url
+            ? '<img class="att-thumb" src="' + esc(o.url) + '" alt="">'
+            : '<span class="att-ic">' + esc(extOf(o.name).slice(0, 4)) + '</span>';
+        return '<div class="attach-item" data-fid="' + (o.id || 0) + '" data-tmp="' + esc(o.key || '') + '">'
+             + thumb
+             + '<div class="att-meta">'
+             +   '<span class="att-name" title="' + esc(o.name) + '">' + esc(o.name) + '</span>'
+             +   '<span class="att-size">' + (o.pending ? '保存后上传 · ' : '') + fmtSizeJs(o.size) + '</span>'
+             + '</div>'
+             + '<button type="button" class="att-x" title="移除">×</button>'
+             + '</div>';
+    }
+
+    function renderAttach() {
+        if (!attachList) return;
+        const all = attachSaved.map(f => ({ ...f, pending: false }))
+            .concat(attachPend.map(p => ({ id: 0, key: p.key, name: p.name, size: p.size,
+                                          img: isImgName(p.name), url: p.url, pending: true })));
+        attachList.innerHTML = all.length
+            ? all.map(attachItemHtml).join('')
+            : '<div class="attach-empty">还没有附件</div>';
+    }
+
+    function clearAttach() {
+        attachPend.forEach(p => { if (p.url) URL.revokeObjectURL(p.url); });
+        attachPend = [];
+        attachSaved = [];
+        renderAttach();
+    }
+
+    async function loadAttach(id) {
+        attachPend = [];
+        attachSaved = [];
+        renderAttach();
+        if (!id) return;
+        try {
+            const d = await getJSON('?ajax=files&id=' + encodeURIComponent(id));
+            attachSaved = (d.files || []).map(f => ({ ...f, url: '?ajax=file&fid=' + f.id }));
+        } catch (e) {
+            /* 附件读不到不影响单据本身 */
+        }
+        renderAttach();
+    }
+
+    async function uploadAttach(files) {
+        const bid = String(batchIdEl.value || '');
+        if (!bid || !files.length) return null;
+
+        const fd = new FormData();
+        fd.append('batch_id', bid);
+        files.forEach(f => fd.append('files[]', f, f.name));
+
+        const res = await fetch('?ajax=upload', { method: 'POST', body: fd });
+        let d = null;
+        try { d = await res.json(); } catch (e) { d = null; }
+        if (!d || !d.ok) throw new Error((d && d.msg) || '上传失败（HTTP ' + res.status + '）');
+
+        const lst = await getJSON('?ajax=files&id=' + encodeURIComponent(bid));
+        attachSaved = (lst.files || []).map(f => ({ ...f, url: '?ajax=file&fid=' + f.id }));
+        renderAttach();
+        return d;
+    }
+
+    on(pickFiles, 'click', () => fileInput && fileInput.click());
+
+    on(fileInput, 'change', async () => {
+        const files = Array.from(fileInput.files || []);
+        fileInput.value = '';
+        if (!files.length) return;
+
+        const total = files.reduce((s, f) => s + (f.size || 0), 0);
+        if (total > 20 * 1024 * 1024) {
+            toast('本次选择合计 ' + fmtSizeJs(total) + '，超过 20MB，请分批上传', 'error');
+            return;
+        }
+
+        /* 新建单还没有 id：先挂起，保存时一起传 */
+        if (!batchIdEl.value) {
+            files.forEach(f => attachPend.push({
+                key: 'p' + Date.now().toString(36) + Math.random().toString(16).slice(2, 8),
+                file: f, name: f.name, size: f.size,
+                url: isImgName(f.name) ? URL.createObjectURL(f) : ''
+            }));
+            renderAttach();
+            toast(files.length + ' 个附件将在保存时上传', 'ok');
+            return;
+        }
+
+        if (attachBusy) return;
+        attachBusy = true;
+        try {
+            const d = await uploadAttach(files);
+            const ok = (d && d.created) ? d.created.length : 0;
+            const skipped = (d && d.skipped) || [];
+            if (skipped.length) toast('已传 ' + ok + ' 个，跳过：' + skipped.join('；'), 'error');
+            else toast('已添加 ' + ok + ' 个附件', 'ok');
+        } catch (err) {
+            toast(err.message || '上传失败', 'error');
+        } finally {
+            attachBusy = false;
+        }
+    });
+
+    on(attachList, 'click', async (e) => {
+        const btn = e.target.closest('.att-x');
+        if (!btn) return;
+        const item = btn.closest('.attach-item');
+        if (!item) return;
+        const fid = parseInt(item.dataset.fid || '0', 10);
+        const key = item.dataset.tmp || '';
+
+        if (fid > 0) {
+            if (!confirm('移除这个附件？')) return;
+            try {
+                await callAPI('?ajax=del_file', { fid: fid });
+                attachSaved = attachSaved.filter(f => f.id !== fid);
+                renderAttach();
+            } catch (err) {
+                toast(err.message || '移除失败', 'error');
+            }
+            return;
+        }
+        if (key) {
+            const idx = attachPend.findIndex(p => p.key === key);
+            if (idx >= 0) {
+                if (attachPend[idx].url) URL.revokeObjectURL(attachPend[idx].url);
+                attachPend.splice(idx, 1);
+                renderAttach();
+            }
+        }
     });
 
     /* ============================================================
@@ -3436,8 +3849,9 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 
         try {
             const editing = !!batchIdEl.value;
+            const pending = attachPend.slice();
             const saveWholesaler = fWholesaler.value.trim();
-            await callAPI('?ajax=save', {
+            const saved = await callAPI('?ajax=save', {
                 id:         editing ? parseInt(batchIdEl.value, 10) : 0,
                 wholesaler: saveWholesaler,
                 odate:      dateRes.iso,
@@ -3445,6 +3859,20 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                 flag:       (fFlag && fFlag.dataset.on === '1') ? 1 : 0,
                 items:      items
             });
+
+            /* 单据已落库：新建的先补上 id，再把排队等着的附件一起传上去。
+               附件失败不回滚单据 —— 单先存住，文件可以回来补 */
+            if (pending.length) {
+                if (!editing && saved && saved.id) batchIdEl.value = String(saved.id);
+                try {
+                    const up = await uploadAttach(pending.map(p => p.file));
+                    if (up && up.skipped && up.skipped.length) {
+                        toast('单据已保存，附件跳过：' + up.skipped.join('；'), 'error');
+                    }
+                } catch (err) {
+                    toast('单据已保存，但附件上传失败：' + (err.message || '未知错误'), 'error');
+                }
+            }
 
             toast(editing ? '修改已保存' : '保存成功', 'ok');
             priceHistory.clear();      /* 单价历史变了，下次重新拉 */
@@ -3562,6 +3990,75 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     /* ============================================================
        11. 列表内操作（事件委托：翻页 / 点条件 / 排序 / 打印 / 编辑 / 删除）
        ============================================================ */
+    /* ---------- 复制为 Markdown：从列表 DOM 直接生成，不再跑一遍接口 ---------- */
+    function mdCell(s) {
+        return String(s || '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim();
+    }
+
+    function batchMarkdown(batchEl) {
+        if (!batchEl) return '';
+        const date = (batchEl.querySelector('.batch-date') || {}).textContent || '';
+        const shop = (batchEl.querySelector('.batch-shop') || {}).textContent || '';
+        const noteEl = batchEl.querySelector('.batch-note');
+        const note = ((noteEl ? noteEl.textContent : '') || '').replace(/^备注：/, '').trim();
+        const flagged = !!batchEl.querySelector('.flag-badge');
+
+        const lines = ['## ' + [date.trim(), shop.trim()].filter(Boolean).join(' '), ''];
+        if (note) lines.push('- 备注：' + note);
+        if (flagged) lines.push('- 状态：数据存疑，待核对');
+        if (note || flagged) lines.push('');
+
+        lines.push('| 商品名称 | 规格 | 单位 | 数量 | 单价 | 小计 |');
+        lines.push('| --- | --- | --- | --- | --- | --- |');
+
+        const rows = batchEl.querySelectorAll('.batch-items tbody tr');
+        for (const tr of rows) {
+            const nc   = tr.querySelector('.name-cell');
+            const name = nc ? (nc.dataset.v || '') : '';
+            const spEl = tr.querySelector('.name-cell .sp');
+            const spec = spEl ? spEl.textContent.trim() : '';
+            /* 列表里没填单位显示的是「—」，搬进 Markdown 就留空，别把占位符也复制进去 */
+            const unitRaw = tr.cells[2] ? tr.cells[2].textContent.trim() : '';
+            const unit = unitRaw === '—' ? '' : unitRaw;
+            const cols  = [name, spec, unit,
+                           tr.cells[3] ? tr.cells[3].textContent.trim() : '',
+                           tr.cells[4] ? tr.cells[4].textContent.trim() : '',
+                           tr.cells[5] ? tr.cells[5].textContent.trim() : ''];
+            lines.push('| ' + cols.map(mdCell).join(' | ') + ' |');
+        }
+
+        const foot = batchEl.querySelector('.batch-foot');
+        const qEl  = foot ? foot.querySelector('.batch-qty strong') : null;
+        const mEl  = foot ? foot.querySelector('.batch-total strong') : null;
+        lines.push('');
+        lines.push('合计数量 **' + (qEl ? qEl.textContent.trim() : '') + '** · 合计金额 **'
+                 + (mEl ? mEl.textContent.trim() : '') + '**');
+        return lines.join('\n');
+    }
+
+    async function copyToClipboard(text) {
+        if (!text) return false;
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(text);
+                return true;
+            }
+        } catch (e) { /* 落到下面的兜底方案 */ }
+
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '0';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        let ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        document.body.removeChild(ta);
+        return ok;
+    }
+
     const NUMERIC_SORT_KEYS = ['qty', 'price', 'subtotal'];
     const SORT_COLUMN = { name: 2, unit: 3, qty: 4, price: 5, subtotal: 6 };
 
@@ -3853,6 +4350,44 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 
         /* ---- 点「存疑」徽章不再有任何动作，纯标记展示 ---- */
 
+        /* ---- 附件：点一次展开，再点收起（每次现拉，避免看到旧内容） ---- */
+        const filesBtn = e.target.closest('.js-files');
+        if (filesBtn) {
+            const batch = filesBtn.closest('.batch');
+            const opened = batch.querySelector('.batch-files');
+            if (opened) { opened.remove(); return; }
+
+            filesBtn.disabled = true;
+            try {
+                const d = await getJSON('?ajax=files&id=' + encodeURIComponent(filesBtn.dataset.id));
+                const files = d.files || [];
+                const box = document.createElement('div');
+                box.className = 'batch-files';
+                box.innerHTML = files.length
+                    ? files.map(f => '<a class="batch-file" href="?ajax=file&fid=' + f.id + '" target="_blank" rel="noopener">'
+                        + (f.img
+                            ? '<img src="?ajax=file&fid=' + f.id + '" alt="" loading="lazy">'
+                            : '<span class="bf-ext">' + esc(extOf(f.name).slice(0, 4)) + '</span>')
+                        + '<span class="bf-name" title="' + esc(f.name) + '">' + esc(f.name) + '</span></a>').join('')
+                    : '<span class="attach-empty">没有附件</span>';
+                batch.appendChild(box);
+            } catch (err) {
+                toast(err.message || '附件加载失败', 'error');
+            } finally {
+                filesBtn.disabled = false;
+            }
+            return;
+        }
+
+        /* ---- 复制为 Markdown ---- */
+        const mdBtn = e.target.closest('.js-md');
+        if (mdBtn) {
+            const md = batchMarkdown(mdBtn.closest('.batch'));
+            const ok = await copyToClipboard(md);
+            toast(ok ? '已复制 Markdown，可直接粘贴' : '复制失败，请手动选择文本', ok ? 'ok' : 'error');
+            return;
+        }
+
         /* ---- 打印 ---- */
         const printBtn = e.target.closest('.js-print');
         if (printBtn) {
@@ -3885,6 +4420,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                 recalc();
                 ensurePriceHistory(currentWholesaler());  /* 顺带把历史单价建议挂好 */
                 refreshPriceTip();
+                loadAttach(b.id);                         /* 已有附件一并载入 */
 
                 formTitle.textContent = '编辑进货单';
                 saveBtn.textContent   = '保存修改';
