@@ -69,7 +69,7 @@ try {
         $pdo->exec("ALTER TABLE items ADD COLUMN spec TEXT NOT NULL DEFAULT ''");
     }
 
-    /* 老库补列：待复核标记 + 标记说明。
+    /* 老库补列：存疑标记 + 标记说明。
        手写单看不清、补录旧单时先勾一下，事后能按标记集中筛出来复核 */
     $batchCols = array_column($pdo->query("PRAGMA table_info(batches)")->fetchAll(), 'name');
     if (!in_array('flag', $batchCols, true)) {
@@ -364,7 +364,7 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         $params += [':q1'=>$like, ':q2'=>$like, ':q3'=>$like, ':q4'=>$like, ':q5'=>$like, ':q6'=>$like];
     }
 
-    /* 筛选：只看待复核 */
+    /* 筛选：只看存疑 */
     if ($flagOnly) {
         $cond[] = "b.flag = 1";
     }
@@ -436,7 +436,7 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         // 依然输出标准的 YYYY-MM-DD 格式
         $html .=       '<span class="batch-date js-set-date" title="点击筛选此日期">' . ($b['odate'] !== '' ? highlight($b['odate'], $q) : '未填日期') . '</span>';
         $html .=       '<span class="batch-shop js-set-shop" data-shop="' . h($b['wholesaler']) . '" title="点击筛选此批发商">' . ($b['wholesaler'] !== '' ? highlight($b['wholesaler'], $q) : '<em>未填写批发商</em>') . '</span>';
-        $html .=       ($flagOn ? '<span class="flag-badge">待复核</span>' : '');
+        $html .=       ($flagOn ? '<span class="flag-badge">存疑</span>' : '');
         $html .=     '</div>';
         $html .=     '<div class="batch-right">';
         $html .=       '<button type="button" class="btn-mini js-print" data-id="' . (int)$b['id'] . '">打印</button>';
@@ -478,7 +478,7 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
             . ($flagNote !== '' ? '<span class="flag-note">标记：' . highlight($flagNote, $q) . '</span>' : '')
             . '</span>';
         $html .=     '<div class="batch-summary">'
-            . '<span class="batch-qty">总数量 <strong>' . fmtNum($totalQty) . '</strong></span>'
+            . '<span class="batch-qty">合计数量 <strong>' . fmtNum($totalQty) . '</strong></span>'
             . '<span class="batch-divider">|</span>'
             . '<span class="batch-total">合计金额 <strong>￥' . number_format($totalMoney, 2) . '</strong></span>'
             . '</div>';
@@ -923,7 +923,7 @@ if ($ajax !== '') {
         $wholesaler = normalizeWholesalerName((string)($data['wholesaler'] ?? ''));
         $odate      = trim((string)($data['odate'] ?? ''));
         $note       = trim((string)($data['note'] ?? ''));
-        /* 「待复核」标记：按钮点开才算；原因记在备注里，flag_note 仅作老数据兼容 */
+        /* 「存疑」标记：按钮点开才算；原因记在备注里，flag_note 仅作老数据兼容 */
         $flag       = ((int)($data['flag'] ?? 0)) === 1 ? 1 : 0;
         $items      = $data['items'] ?? [];
 
@@ -1028,7 +1028,7 @@ if ($ajax !== '') {
         jsonOut(['ok' => true]);
     }
 
-    /* 一键取消「待复核」：核对无误后点一下徽章就清掉，不用进去逐项改 */
+    /* 取消存疑：接口保留给外部调用；页面上的取消改在编辑页里点按钮完成 */
     if ($ajax === 'unflag' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $data = bodyJson() ?? [];
         $id   = (int)($data['id'] ?? 0);
@@ -1644,7 +1644,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     .items-table th:nth-child(7){width:44px  !important;}
 }
 
-/* ---- 待复核标记 ---- */
+/* ---- 存疑标记 ---- */
 .flag-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;padding:2px 9px;border-radius:999px;
     font-size:12px;line-height:18px;color:#8a5300;background:#fff4e0;border:1px solid #ffd79a;white-space:nowrap;vertical-align:middle;
     font-family:inherit;cursor:default;user-select:none;}
@@ -1699,7 +1699,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
                 </div>
                 <div class="stat-content">
-                    <span class="stat-label">进货单数</span>
+                    <span class="stat-label">累计单数</span>
                     <strong class="stat-value"><span id="stat-count"><?= $stats['total_count'] ?></span><span class="unit">单</span></strong>
                 </div>
             </div>
@@ -1717,8 +1717,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
                 </div>
                 <div class="stat-content">
-                    <span class="stat-label">本月金额</span>
-                    <strong class="stat-value money">￥<span id="stat-month-amount"><?= $stats['month_amount'] ?></span></strong>
+                    <span class="stat-label">本月单数</span>
+                    <strong class="stat-value"><span id="stat-month-count"><?= $stats['month_count'] ?></span><span class="unit">单</span></strong>
                 </div>
             </div>
             <div class="stat">
@@ -1726,8 +1726,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
                 </div>
                 <div class="stat-content">
-                    <span class="stat-label">本月单数</span>
-                    <strong class="stat-value"><span id="stat-month-count"><?= $stats['month_count'] ?></span><span class="unit">单</span></strong>
+                    <span class="stat-label">本月金额</span>
+                    <strong class="stat-value money">￥<span id="stat-month-amount"><?= $stats['month_amount'] ?></span></strong>
                 </div>
             </div>
         </div>
@@ -1770,7 +1770,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                     <div class="filter-item">
                         <label class="flag-check filter-flag">
                             <input type="checkbox" id="flagFilter"<?= isset($_GET['f']) && $_GET['f'] === '1' ? ' checked' : '' ?>>
-                            <span>只看待复核</span>
+                            <span>只看存疑</span>
                             <span class="flag-num" id="flagCount"><?= (int)$stats['flagged_count'] ?></span>
                         </label>
                     </div>
@@ -1958,7 +1958,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 
                 <div class="form-footer">
                     <div class="total-box">
-                        <span class="total-qty-label">总数量</span>
+                        <span class="total-qty-label">合计数量</span>
                         <strong id="grandQty">0</strong>
                         <span class="total-divider">|</span>
                         <span>合计金额</span>
@@ -3562,10 +3562,10 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         html += '<div class="print-meta">';
         html += '<div><strong>批发商：</strong>' + (wholesaler === '未填写批发商' ? '—' : esc(wholesaler)) + '</div>';
         html += '<div><strong>日期：</strong>' + (date === '未填日期' ? '—' : esc(date)) + '</div>';
-        /* 打了「待复核」的单，打印样张上也留一行，对着纸核对时一眼能看到 */
+        /* 打了「存疑」的单，打印样张上也留一行，对着纸核对时一眼能看到 */
         if (flagEl) {
             const fNote = flagNoteEl ? flagNoteEl.textContent.replace('标记：', '').trim() : '';
-            html += '<div><strong>标记：</strong>待复核' + (fNote ? '（' + esc(fNote) + '）' : '') + '</div>';
+            html += '<div><strong>标记：</strong>存疑' + (fNote ? '（' + esc(fNote) + '）' : '') + '</div>';
         }
         html += '</div>';
         html += '<table class="print-table">';
@@ -3591,7 +3591,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 
         html += '</tbody></table>';
         html += '<div class="print-footer">';
-        html += '<div>总数量：' + esc(totalQty) + '</div>';
+        html += '<div>合计数量：' + esc(totalQty) + '</div>';
         html += '<div>合计金额：' + esc(totalMoney) + '</div>';
         html += '</div>';
         if (noteTxt) html += '<div class="print-note"><strong>备注：</strong>' + esc(noteTxt) + '</div>';
@@ -3770,7 +3770,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             return;
         }
 
-        /* ---- 点「待复核」徽章不再有任何动作，纯标记展示 ---- */
+        /* ---- 点「存疑」徽章不再有任何动作，纯标记展示 ---- */
 
         /* ---- 打印 ---- */
         const printBtn = e.target.closest('.js-print');
