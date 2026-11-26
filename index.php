@@ -3270,17 +3270,27 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             e.preventDefault();
             hidePriceTip();
         }
-        /* 单价：方向键不改数、回车即定格两位小数 */
-        if (t.classList.contains('i-price')) {
+        /* 单价 / 小计：方向键不改数；回车先收浮层，再按一次就提交保存 */
+        if (t.classList.contains('i-price') || t.classList.contains('i-sub')) {
             if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                 e.preventDefault();
                 return;
             }
             if (e.key === 'Enter') {
+                if (e.isComposing) return;          /* 输入法选字时的回车不算，别把单子存了 */
                 e.preventDefault();
-                formatPrice(t);
-                hidePriceTip();
+                if (saveBtn.disabled) return;       /* 正在保存，别叠着再提一次 */
+
+                if (t.classList.contains('i-price')) formatPrice(t);
                 recalc();
+
+                /* 第一次回车只是收起历史价浮层：这个当口多半是在看历史价，
+                   立刻存掉反而挡人；浮层收起来后再按一次才提交 */
+                if (priceTipRow) {
+                    hidePriceTip();
+                    return;
+                }
+                submitBatch();
             }
         }
     });
