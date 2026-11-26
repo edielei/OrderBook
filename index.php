@@ -1135,6 +1135,14 @@ h1{
 .stat-value.money { color: var(--primary-strong); }
 .stat .unit { font-size: 13px; color: var(--muted); margin-left: 4px; font-weight: 500; }
 
+/* 存疑单数：一条跨整行的提示条，点一下直接筛出来 */
+.stat-flag{grid-column:1 / -1; cursor:pointer;}
+.stat-flag .stat-icon{background:#fff4e0;color:#d48806;}
+.stat-flag:hover{border-color:#f5c678;background:#fffdf8;}
+.stat-flag .stat-hint{margin-left:auto;font-size:12px;color:var(--muted);font-weight:500;letter-spacing:.2px;}
+.stat-flag.is-zero{opacity:.7;}
+.stat-flag.is-zero .stat-hint{color:#b3bcc8;}
+
 /* ---------- 卡片 ---------- */
 .card{
     background:var(--card);border:1px solid var(--line-card);border-radius:var(--radius);
@@ -1730,6 +1738,16 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                     <strong class="stat-value money">￥<span id="stat-month-amount"><?= $stats['month_amount'] ?></span></strong>
                 </div>
             </div>
+            <div class="stat stat-flag<?= (int)$stats['flagged_count'] > 0 ? '' : ' is-zero' ?>" id="statFlagCard" tabindex="0" role="button" title="点击只看存疑">
+                <div class="stat-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6l8.6 15.4H3.4z"></path><line x1="12" y1="9.6" x2="12" y2="14.2"></line><line x1="12" y1="16.8" x2="12" y2="16.9"></line></svg>
+                </div>
+                <div class="stat-content">
+                    <span class="stat-label">存疑单数</span>
+                    <strong class="stat-value"><span id="stat-flagged"><?= (int)$stats['flagged_count'] ?></span><span class="unit">单</span></strong>
+                </div>
+                <span class="stat-hint">点击只看存疑 →</span>
+            </div>
         </div>
 
         <section class="card">
@@ -2148,6 +2166,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     const statAmount      = $('stat-amount');
     const statMonthCount  = $('stat-month-count');
     const statMonthAmount = $('stat-month-amount');
+    const statFlagged     = $('stat-flagged');
+    const statFlagCard    = $('statFlagCard');
 
     /* ============================================================
        5. 筛选条件：日期 / 批发商 / 条件标签
@@ -2215,6 +2235,24 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 
     on(shopFilter, 'change', () => refreshList(1));
     on(flagFilter, 'change', () => refreshList(1));
+
+    /* 点「存疑单数」这条 → 直接切到「只看存疑」 */
+    function openFlagFilter() {
+        if (!flagFilter) return;
+        if (!flagFilter.checked) {
+            flagFilter.checked = true;
+            flagFilter.dispatchEvent(new Event('change', { bubbles: true }));
+        } else {
+            refreshList(1);
+        }
+        scrollToPanel('list');
+    }
+    if (statFlagCard) {
+        statFlagCard.addEventListener('click', openFlagFilter);
+        statFlagCard.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFlagFilter(); }
+        });
+    }
 
     /* 已生效的筛选条件 → 可单独移除的小标签 */
     function clearDateFilter() {
@@ -3459,6 +3497,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             if (statMonthCount)  statMonthCount.textContent  = d.month_count;
             if (statMonthAmount) statMonthAmount.textContent = d.month_amount;
             if (flagCount)       flagCount.textContent       = d.flagged_count;
+            if (statFlagged)     statFlagged.textContent     = d.flagged_count;
+            if (statFlagCard)    statFlagCard.classList.toggle('is-zero', !(d.flagged_count > 0));
         } catch (err) { /* 统计失败不影响主流程 */ }
     }
 
