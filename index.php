@@ -1148,7 +1148,6 @@ h1{
 .stat-flagbox .flagbox-label{font-size:11px; font-weight:600; letter-spacing:.5px;}
 .stat-flagbox:hover{background:#eaeff7; border-color:#dfe5ee;}
 .stat-flagbox:focus-visible{outline:2px solid #c7d5f8; outline-offset:2px;}
-.stat-flagbox.is-zero{opacity:.45;}
 /* 已勾选「只看存疑」：琥珀选中态 */
 .stat-flagbox.is-on{background:#fff2dc; border-color:#f2cf96; color:#c07a06;}
 .stat-flagbox.is-on .flagbox-label{color:#d4900c;}
@@ -1721,7 +1720,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                     <span class="stat-label">累计单数</span>
                     <strong class="stat-value"><span id="stat-count"><?= $stats['total_count'] ?></span><span class="unit">单</span></strong>
                 </div>
-                <div class="stat-flagbox<?= (int)$stats['flagged_count'] > 0 ? '' : ' is-zero' ?>" id="statFlagBox" tabindex="0" role="button" title="数据存疑，待核对｜点击只看存疑">
+                <div class="stat-flagbox<?= (int)$stats['flagged_count'] > 0 ? '' : ' is-zero' ?>" id="statFlagBox" tabindex="0" role="button" title="数据存疑，待核对｜点击只看存疑" style="<?= (int)$stats['flagged_count'] > 0 ? '' : 'display:none' ?>">
                     <span class="flagbox-num" id="stat-flagged"><?= (int)$stats['flagged_count'] ?></span>
                     <span class="flagbox-label">存疑</span>
                 </div>
@@ -3505,7 +3504,11 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             if (statMonthAmount) statMonthAmount.textContent = d.month_amount;
             if (flagCount)       flagCount.textContent       = d.flagged_count;
             if (statFlagged)     statFlagged.textContent     = d.flagged_count;
-            if (statFlagBox)     statFlagBox.classList.toggle('is-zero', !(d.flagged_count > 0));
+            if (statFlagBox) {
+                const has = d.flagged_count > 0;
+                statFlagBox.classList.toggle('is-zero', !has);
+                statFlagBox.style.display = has ? '' : 'none';
+            }
         } catch (err) { /* 统计失败不影响主流程 */ }
     }
 
