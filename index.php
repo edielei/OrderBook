@@ -4371,12 +4371,9 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                 await callAPI('?ajax=wdelete', { id: deletedId });
                 toast('已删除', 'ok');
                 if (shopIdEl.value === delBtn.dataset.id) resetShopForm();
-                /* 删掉的正是当前打开的详情：没有这家了，退回列表，别留一张查不到的旧表 */
-                if (detailShopId === deletedId) {
-                    detailShopId = 0;
-                    detailShopName = '';
-                    showShopDetail(false);
-                }
+                /* 删掉的正是当前打开的详情：没有这家了，退回列表，别留一张查不到的旧表；
+                   顺手把刚才压的那条历史记录退掉，免得之后按后退还要多按一次 */
+                if (detailShopId === deletedId) closeShopDetail();
                 /* 下拉框少了一项，若正好是当前筛选值，列表要跟着变，标签也要同步 */
                 const gone = w ? w.name : '';
                 if (gone && shopFilter && shopFilter.value === gone) shopFilter.value = '';
@@ -4403,6 +4400,44 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         shopListCard.style.display   = show ? 'none'  : 'block';
         if (shopFormCard) shopFormCard.style.display = show ? 'none' : 'block';
     }
+
+    /* ---- 详情也是「一页」：压一条历史记录，浏览器后退就等于退回批发商列表 ----
+       用 #wh-<id> 做标记，退回去时地址栏也跟着变回来；不支持 history 的老环境照样能看，
+       只是后退会回到上一页（退一格是“流程后退”，不是“关闭本页”） */
+    let detailHistPushed = false;
+
+    function pushDetailHistory(id) {
+        try {
+            if (detailHistPushed) {
+                history.replaceState({ ob: 'whdetail', id: id }, '', '#wh-' + id);
+                return;
+            }
+            history.pushState({ ob: 'whdetail', id: id }, '', '#wh-' + id);
+            detailHistPushed = true;
+        } catch (err) { /* 隐私模式 / file:// 下 pushState 不可用：不影响查看 */ }
+    }
+
+    /* 「返回」按钮：有历史记录就走真的后退（popstate 里统一关详情） */
+    function closeShopDetail() {
+        if (detailHistPushed) {
+            detailHistPushed = false;      /* 记录用掉了 */
+            try { history.back(); return; } catch (err) { /* 退不了就走下面的兜底 */ }
+        }
+        detailShopId   = 0;
+        detailShopName = '';
+        showShopDetail(false);
+        scrollToPanel('shop');
+    }
+
+    on(window, 'popstate', () => {
+        detailHistPushed = false;
+        if (!shopDetailCard || shopDetailCard.style.display === 'none') return;
+        detailShopId   = 0;
+        detailShopName = '';
+        showShopDetail(false);
+        const shopPanel = document.getElementById('panel-shop');
+        if (shopPanel && shopPanel.classList.contains('active')) scrollToPanel('shop');
+    });
 
     /* 详情表排序：取值规则与明细表一致，数值列按数字比、文字列按字典序、日期按字符串比 */
     const toNum = (v) => parseFloat(String(v === undefined || v === null ? '' : v).replace(/[^\d.-]/g, '')) || 0;
@@ -4507,6 +4542,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             shopDetailBox.innerHTML  = '';
             showShopDetail(true);
             scrollToPanel('shop');
+            pushDetailHistory(detailShopId);   /* 打开就是“进入下一页”，后退能回列表 */
         }
 
         try {
@@ -4552,10 +4588,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         return openShopDetail(detailShopId, detailShopName, true);
     }
 
-    on(shopDetailBack, 'click', () => {
-        showShopDetail(false);
-        scrollToPanel('shop');
-    });
+    on(shopDetailBack, 'click', closeShopDetail);
 
     /* 详情表表头排序：点 # 恢复默认顺序；文字列第一次从小到大，数值/日期列第一次从大到小 */
     const DETAIL_TEXT_ASC = ['name', 'unit'];
