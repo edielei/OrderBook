@@ -258,3 +258,12 @@ wholesalers    -- 批发商档案
 | `?ajax=names&q=&w=&scope=` | GET | `q`、`w`、`scope=wh/all` | 商品名联想；`q` 空时返回该家商品总数，少于 15 种连清单一起给 |
 
 </details>
+
+
+---
+
+## 许可证
+
+本项目采用 [MIT 许可证](LICENSE)。
+
+Copyright (c) 2026 edielei
