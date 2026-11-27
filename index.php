@@ -1187,9 +1187,23 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
 .items-table th{
     background:#f7f9fd;color:var(--muted);font-size:12.5px;font-weight:600;text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);white-space:nowrap;
 }
-.items-table th:nth-child(4),
 .items-table th:nth-child(5),
-.items-table th:nth-child(6) { text-align: right; }
+.items-table th:nth-child(6),
+.items-table th:nth-child(7) { text-align: right; }
+
+/* 行首拖拽手柄：只有这一小块能拖，输入框里照常选字，不会误触重排 */
+.items-table .th-drag{width:34px;}
+.items-table .td-drag{width:34px;text-align:center;padding:9px 4px 9px 8px;}
+.drag-handle{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:22px;height:28px;border-radius:7px;color:#bcc8d8;
+    cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none;
+}
+.drag-handle:hover{color:var(--primary);background:#eff4ff;}
+.drag-handle:active{cursor:grabbing;}
+/* 拖动中的那一行淡一点，让人看出它正被拎着走 */
+.item-row.is-dragging{opacity:.62;}
+.item-row.is-dragging td{background:#f6f9ff;}
 
 .items-table td{padding:9px 10px;border-bottom:1px solid #f1f5fb;}
 .items-table tbody tr:last-child td{border-bottom:none;}
@@ -1684,12 +1698,15 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     .items-table{min-width:0;font-size:13.5px;}
     .items-table th,
     .items-table td{padding:8px 6px;}
-    .items-table th:nth-child(2){width:104px !important;}
-    .items-table th:nth-child(3){width:76px  !important;}
-    .items-table th:nth-child(4){width:96px  !important;}
-    .items-table th:nth-child(5){width:104px !important;}
-    .items-table th:nth-child(6){width:90px  !important;}
-    .items-table th:nth-child(7){width:44px  !important;}
+    .items-table .th-drag,
+    .items-table .td-drag{width:24px;}
+    .items-table .td-drag{padding:8px 2px 8px 4px;}
+    .items-table th:nth-child(3){width:100px !important;}
+    .items-table th:nth-child(4){width:72px  !important;}
+    .items-table th:nth-child(5){width:92px  !important;}
+    .items-table th:nth-child(6){width:100px !important;}
+    .items-table th:nth-child(7){width:86px  !important;}
+    .items-table th:nth-child(8){width:40px  !important;}
 }
 
 /* ---- 存疑标记 ---- */
@@ -1997,6 +2014,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                     <table class="items-table">
                         <thead>
                             <tr>
+                                <th class="th-drag" title="按住行首手柄可拖动排序"></th>
                                 <th>商品名称<span class="req">*</span></th>
                                 <th style="width:150px">规格</th>
                                 <th style="width:110px">单位</th>
@@ -3036,6 +3054,12 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 
     function rowHTML() {
         return '<tr class="item-row">'
+            + '<td class="td-drag"><span class="drag-handle" title="按住拖动，调整这一行的位置" aria-label="拖动排序">'
+            +   '<svg viewBox="0 0 10 16" width="10" height="16" fill="currentColor" aria-hidden="true">'
+            +   '<circle cx="3" cy="3" r="1.4"/><circle cx="7" cy="3" r="1.4"/>'
+            +   '<circle cx="3" cy="8" r="1.4"/><circle cx="7" cy="8" r="1.4"/>'
+            +   '<circle cx="3" cy="13" r="1.4"/><circle cx="7" cy="13" r="1.4"/>'
+            +   '</svg></span></td>'
             + '<td><input class="i-name" placeholder="商品名称" autocomplete="off"></td>'
             + '<td><input class="i-spec" placeholder="选填规格" autocomplete="off"></td>'
             + '<td><input class="i-unit" placeholder="箱 / 个"></td>'
@@ -3071,9 +3095,10 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     }
 
     /* 行内取值：表格结构由 rowHTML 固定，直接按单元格下标取，比每行两次 querySelector 快；
-       万一结构被动过，退回按类名查找，不会因为拿不到节点就把金额算成 0 */
-    const CELL_QTY = 3;
-    const CELL_PRICE = 4;
+       万一结构被动过，退回按类名查找，不会因为拿不到节点就把金额算成 0。
+       第 0 格是拖拽手柄，数量 / 单价因此从 4、5 起算 */
+    const CELL_QTY = 4;
+    const CELL_PRICE = 5;
 
     function cellInput(tr, idx) {
         const cell = tr.cells && tr.cells[idx];
@@ -3458,6 +3483,61 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         const nameEl = tr && tr.querySelector('.i-name');
         if (nameEl) nameEl.focus();
     });
+
+    /* ============================================================
+       11.5 明细行拖拽排序
+       按住行首手柄上下拖，整行实时跟着走。保存和打印都按表格当前的行序，
+       明细里也没有序号列，所以拖完不用重编号、不用改提交逻辑。
+       用 Pointer Events 一套逻辑同时覆盖鼠标、触摸和触控笔。
+       ============================================================ */
+    let dragRow = null;
+    let dragPtr = null;
+
+    function dropRowAt(y) {
+        if (!dragRow || !itemsBody) return;
+        const rows = Array.from(itemsBody.rows);
+        let target = null;
+        for (const tr of rows) {
+            if (tr === dragRow) continue;
+            const r = tr.getBoundingClientRect();
+            if (y < r.top + r.height / 2) { target = tr; break; }   /* 指针进入某行上半部 → 插到它前面 */
+        }
+        if (target) {
+            if (dragRow.nextElementSibling !== target) itemsBody.insertBefore(dragRow, target);
+        } else if (itemsBody.lastElementChild !== dragRow) {
+            itemsBody.appendChild(dragRow);                        /* 指针在所有行下半部 → 挪到末尾 */
+        }
+    }
+
+    on(itemsBody, 'pointerdown', (e) => {
+        const handle = e.target.closest && e.target.closest('.drag-handle');
+        if (!handle || e.isPrimary === false) return;
+        const tr = handle.closest('tr');
+        if (!tr || !itemsBody || itemsBody.rows.length < 2) return;
+        e.preventDefault();                 /* 手柄按下时别把焦点抢到输入框上去 */
+        hidePriceTip();
+        hideNameTip();
+        dragRow = tr;
+        dragPtr = e.pointerId;
+        tr.classList.add('is-dragging');
+        try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+
+    on(itemsBody, 'pointermove', (e) => {
+        if (!dragRow || e.pointerId !== dragPtr) return;
+        e.preventDefault();
+        dropRowAt(e.clientY);
+    });
+
+    function endRowDrag(e) {
+        if (!dragRow) return;
+        if (e && e.pointerId !== undefined && e.pointerId !== dragPtr) return;
+        dragRow.classList.remove('is-dragging');
+        dragRow = null;
+        dragPtr = null;
+    }
+    on(itemsBody, 'pointerup', endRowDrag);
+    on(itemsBody, 'pointercancel', endRowDrag);
 
     function resetForm() {
         hidePriceTip();
