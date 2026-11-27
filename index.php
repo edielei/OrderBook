@@ -3958,7 +3958,6 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         const dateEl   = card.querySelector('.batch-date');
         const shopEl   = card.querySelector('.batch-shop');
         const noteEl   = card.querySelector('.batch-note');
-        const flagEl   = card.querySelector('.flag-badge');
         const qtyEl    = card.querySelector('.batch-qty strong');
         const moneyEl  = card.querySelector('.batch-total strong');
 
@@ -3973,10 +3972,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         html += '<div class="print-meta">';
         html += '<div><strong>批发商：</strong>' + (wholesaler === '未填写批发商' ? '—' : esc(wholesaler)) + '</div>';
         html += '<div><strong>日期：</strong>' + (date === '未填日期' ? '—' : esc(date)) + '</div>';
-        /* 打了「存疑」的单，打印样张上也留一行，对着纸核对时一眼能看到 */
-        if (flagEl) {
-            html += '<div><strong>标记：</strong>存疑</div>';
-        }
+        /* 「存疑」只是录单时的内部提醒，打印稿上不出现，纸上就是一张干净的单子 */
         html += '</div>';
         html += '<table class="print-table">';
         html += '<thead><tr><th>#</th><th>商品名称</th><th>单位</th><th class="num">数量</th><th class="num">单价</th><th class="num">小计</th></tr></thead><tbody>';
@@ -4040,6 +4036,11 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     let printBusy = false;
     function printBatch(card) {
         if (printBusy) { toast('正在打印，等这个对话框关掉再点'); return; }
+
+        /* 存疑单先问一句：数据还没核对完就印出去，提醒一下 */
+        if (card && card.querySelector('.flag-badge')) {
+            if (!confirm('这张单标着「存疑」，还没核对完就打出来吗？')) return;
+        }
 
         const html = buildPrintHTML(card);
         const doc  = '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">'
