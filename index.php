@@ -3495,6 +3495,9 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 
     function dropRowAt(y) {
         if (!dragRow || !itemsBody) return;
+        /* 行已经被清出表格（重置表单 / 重新载入另一张单）就别再往里插，
+           否则会把这行旧数据搬回到新单里 */
+        if (dragRow.parentNode !== itemsBody) { resetDragState(); return; }
         const rows = Array.from(itemsBody.rows);
         let target = null;
         for (const tr of rows) {
@@ -3517,6 +3520,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         e.preventDefault();                 /* 手柄按下时别把焦点抢到输入框上去 */
         hidePriceTip();
         hideNameTip();
+        resetDragState();                   /* 上一次要是没收尾，先彻底清干净再开新的 */
         dragRow = tr;
         dragPtr = e.pointerId;
         dragPointerY = e.clientY;
@@ -3567,19 +3571,35 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         if (step !== 0 && !dragRaf) dragRaf = requestAnimationFrame(dragScrollTick);
     }
 
-    function endRowDrag(e) {
-        if (!dragRow) return;
-        if (e && e.pointerId !== undefined && e.pointerId !== dragPtr) return;
+    /* 把拖拽状态彻底清干净：正常松手、pointercancel、重置表单都走这一个出口，
+       免得中断的拖动把旧的 dragRow（已被清出 DOM 的行）留到下一张单里 */
+    function resetDragState() {
         if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = 0; }
         dragStep = 0;
-        dragRow.classList.remove('is-dragging');
+        if (dragRow) dragRow.classList.remove('is-dragging');
+        if (itemsBody) {
+            itemsBody.querySelectorAll('tr.is-dragging').forEach((tr) => tr.classList.remove('is-dragging'));
+        }
         dragRow = null;
         dragPtr = null;
     }
+
+    function endRowDrag(e) {
+        if (!dragRow) return;
+        if (e && e.pointerId !== undefined && e.pointerId !== dragPtr) return;
+        resetDragState();
+    }
     on(itemsBody, 'pointerup', endRowDrag);
     on(itemsBody, 'pointercancel', endRowDrag);
+    /* 拖到表格外面再松手（页头、窗口外、切走窗口）也要收尾：
+       指针捕获万一没生效，就靠 window 上这两条兜底 */
+    on(window, 'pointerup', endRowDrag);
+    on(window, 'pointercancel', endRowDrag);
+    /* 拖到一半切走窗口、松手消息收不到时，也把状态收掉 */
+    on(window, 'blur', () => resetDragState());
 
     function resetForm() {
+        resetDragState();          /* 清表格之前先把拖拽状态收掉，别留下孤儿行 */
         hidePriceTip();
         hideNameTip();
         batchIdEl.value    = '';
@@ -4101,6 +4121,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
                 if (fFlag) setFlagOn(!!b.flag);
                 markInvalid(fOdateText, false);      /* 清掉上一次残留的红框 */
 
+                resetDragState();                    /* 换单前先收掉上一单可能残留的拖动 */
                 itemsBody.innerHTML = '';
                 hidePriceTip();
                 hideNameTip();
