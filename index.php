@@ -4429,7 +4429,16 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         scrollToPanel('shop');
     }
 
-    on(window, 'popstate', () => {
+    on(window, 'popstate', (e) => {
+        const st = (e && e.state) || history.state || null;
+        /* 前进又回到「详情」那条记录：详情重新打开，别让前进白按一下 */
+        if (st && st.ob === 'whdetail' && st.id) {
+            const w = findShop(parseInt(st.id, 10));
+            const nm = w ? w.name : (detailShopName || '批发商');
+            detailHistPushed = true;                       /* 此时历史里正停在详情这一格 */
+            openShopDetail(st.id, nm, false, true);        /* noHistory：forward 回来不再压新记录 */
+            return;
+        }
         detailHistPushed = false;
         if (!shopDetailCard || shopDetailCard.style.display === 'none') return;
         detailShopId   = 0;
@@ -4519,7 +4528,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         }).join('');
     }
 
-    async function openShopDetail(id, name, silent) {
+    async function openShopDetail(id, name, silent, noHistory) {
         if (!shopDetailCard) return;
 
         detailShopId   = parseInt(id, 10) || 0;
@@ -4542,7 +4551,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             shopDetailBox.innerHTML  = '';
             showShopDetail(true);
             scrollToPanel('shop');
-            pushDetailHistory(detailShopId);   /* 打开就是“进入下一页”，后退能回列表 */
+            /* noHistory：从浏览器「前进」回来时历史已经停在详情这一格，不能再压一条 */
+            if (!noHistory) pushDetailHistory(detailShopId);   /* 打开就是“进入下一页”，后退能回列表 */
         }
 
         try {
