@@ -2624,7 +2624,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
 
     /* 历史价只走自绘浮层，不再挂 datalist（两套下拉会互相遮挡） */
     function refreshPriceTip() {
-        if (priceTipRow) showPriceTip(priceTipRow);   /* 浮层开着就跟着刷新 */
+        if (priceTipRow) showPriceTip(priceTipRow, true);   /* 浮层开着就跟着刷新，键盘选中的项保留 */
     }
 
     /* ---------- 涨跌小标：本行单价 VS 这家这货「最近一次」单价 ----------
@@ -2757,6 +2757,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     /* ---------- 历史价浮层：原生 datalist 在数字框上不一定弹，这个一定看得见 ---------- */
     let priceTip    = null;      /* 复用的浮层节点，全局只建一个 */
     let priceTipRow = null;      /* 当前浮层对应的行 */
+    let priceTipIdx = -1;        /* 键盘高亮下标：-1 = 还没用方向键挑 */
 
     function ensurePriceTip() {
         if (priceTip) return priceTip;
@@ -2770,23 +2771,44 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         priceTip.addEventListener('click', (e) => {
             const item = e.target.closest('.price-tip-item');
             if (!item || !priceTipRow) return;
-
-            const priceEl = priceTipRow.querySelector('.i-price');
-            if (!priceEl) return;
-            const tr = priceTipRow;
-            priceEl.value = item.dataset.price || '0.00';
-            formatPrice(priceEl);
-            recalc();
-            hidePriceTip();
-            refreshPriceDelta(tr);
-            priceEl.focus();
+            applyPriceFromTip(item.dataset.price);
         });
         return priceTip;
+    }
+
+    /* 把某个历史价填进当前行（鼠标点、键盘回车都走这里） */
+    function applyPriceFromTip(price) {
+        if (!priceTipRow) return;
+        const priceEl = priceTipRow.querySelector('.i-price');
+        if (!priceEl) return;
+        const tr = priceTipRow;
+        priceEl.value = price || '0.00';
+        formatPrice(priceEl);
+        recalc();
+        hidePriceTip();
+        refreshPriceDelta(tr);
+        priceEl.focus();
+    }
+
+    /* 键盘选中某一项：夹住下标、加高亮、并把这一项滚进浮层可视区 */
+    function setPriceTipIdx(i) {
+        if (!priceTip) return;
+        const nodes = priceTip.querySelectorAll('.price-tip-item');
+        if (!nodes.length) return;
+        priceTipIdx = Math.max(0, Math.min(i, nodes.length - 1));
+        nodes.forEach((n, k) => n.classList.toggle('active', k === priceTipIdx));
+        const cur = nodes[priceTipIdx];
+        if (!cur) return;
+        const top = cur.offsetTop;
+        const bot = top + cur.offsetHeight;
+        if (top < priceTip.scrollTop) priceTip.scrollTop = top;
+        else if (bot > priceTip.scrollTop + priceTip.clientHeight) priceTip.scrollTop = bot - priceTip.clientHeight;
     }
 
     function hidePriceTip() {
         if (priceTip) priceTip.classList.remove('show');
         priceTipRow = null;
+        priceTipIdx = -1;
     }
 
     function guardTipWheel(tip) {
@@ -2805,7 +2827,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     function placeTip(tip, el, maxW) {
         const cap = maxW || 280;
         const r = el.getBoundingClientRect();
-        const w = Math.min(Math.max(r.width, 168), cap);
+        const w = Math.min(Math.max(r.width, 190), cap);
         const h = tip.offsetHeight;
         let top = r.bottom + 6;
         if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
@@ -2815,14 +2837,15 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         tip.style.top   = top + 'px';
     }
 
-    function showPriceTip(tr) {
+    function showPriceTip(tr, keepNav) {
         const list = priceListFor(tr);
         const priceEl = tr ? tr.querySelector('.i-price') : null;
         if (!list || !priceEl) { hidePriceTip(); return; }
 
         const tip = ensurePriceTip();
         priceTipRow = tr;
-        tip.innerHTML = '<div class="price-tip-head">历史单价 · 点一下填入</div>'
+        if (!keepNav) priceTipIdx = -1;     /* 换行/重开浮层时回到“还没挑” */
+        tip.innerHTML = '<div class="price-tip-head">历史单价 · ↑↓ 选、回车填入</div>'
             + list.map((p, i) =>
                 '<div class="price-tip-item" data-price="' + esc(p.price) + '">'
                 + '<span class="pty-price">￥' + esc(p.price) + '</span>'
@@ -2832,6 +2855,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             ).join('');
         tip.classList.add('show');
         placeTip(tip, priceEl);
+        /* 刷新内容（比如商品名刚填上）时，别把用户已经用方向键挑中的那一项弄丢 */
+        if (priceTipIdx >= 0) setPriceTipIdx(priceTipIdx);
     }
 
     /* ---------- 商品名联想浮层：输入 ≥2 个字按历史记录模糊匹配 ---------- */
@@ -3402,6 +3427,26 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
             e.preventDefault();
             hidePriceTip();
         }
+        /* 历史价浮层开着：↑↓ 挑一项、回车填入、Tab 顺手收起 */
+        if (t.classList.contains('i-price') && priceTipRow && priceTip && priceTip.classList.contains('show')) {
+            const nodes = priceTip.querySelectorAll('.price-tip-item');
+            if (nodes.length) {
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const next = priceTipIdx < 0 ? 0 : priceTipIdx + (e.key === 'ArrowDown' ? 1 : -1);
+                    setPriceTipIdx(next);
+                    return;
+                }
+                if (e.key === 'Enter' && !e.isComposing && priceTipIdx >= 0) {
+                    e.preventDefault();
+                    const cur = nodes[priceTipIdx];
+                    if (cur) applyPriceFromTip(cur.dataset.price);
+                    return;
+                }
+                if (e.key === 'Tab') hidePriceTip();
+            }
+        }
+
         /* 单价 / 小计：方向键不改数；回车先收浮层，再按一次就提交保存 */
         if (t.classList.contains('i-price') || t.classList.contains('i-sub')) {
             if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
