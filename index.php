@@ -3519,6 +3519,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         hideNameTip();
         dragRow = tr;
         dragPtr = e.pointerId;
+        dragPointerY = e.clientY;
+        dragStep = 0;
         tr.classList.add('is-dragging');
         try { handle.setPointerCapture(e.pointerId); } catch (err) {}
     });
@@ -3527,11 +3529,49 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         if (!dragRow || e.pointerId !== dragPtr) return;
         e.preventDefault();
         dropRowAt(e.clientY);
+        updateDragAutoScroll(e.clientY);
     });
+
+    /* 明细比一屏还长时，把行拖到视口上/下边缘会让页面自己滚：
+       越靠边滚得越快（1px/帧起、10px/帧封顶，约 600px/s），到底/到顶就停，不空转 */
+    const DRAG_EDGE = 72;          /* 上下各 72px 算「热区」 */
+    const DRAG_MAX_STEP = 10;      /* 每帧最多滚 10px */
+    let dragPointerY = 0;
+    let dragStep = 0;
+    let dragRaf = 0;
+
+    function dragScrollTick() {
+        if (!dragRow || dragStep === 0) { dragRaf = 0; return; }
+        const before = window.scrollY;
+        window.scrollBy(0, dragStep);
+        if (window.scrollY !== before) {
+            dropRowAt(dragPointerY);      /* 页面动了，插入点跟着重算 */
+        } else {
+            dragStep = 0;                 /* 已经到顶或到底，停下等下一次 pointermove 再看 */
+            dragRaf = 0;
+            return;
+        }
+        dragRaf = requestAnimationFrame(dragScrollTick);
+    }
+
+    function updateDragAutoScroll(y) {
+        dragPointerY = y;
+        const vh = window.innerHeight || 0;
+        let step = 0;
+        if (y < DRAG_EDGE) {
+            step = -Math.max(1, Math.round((DRAG_EDGE - y) / DRAG_EDGE * DRAG_MAX_STEP));
+        } else if (y > vh - DRAG_EDGE) {
+            step = Math.max(1, Math.round((y - (vh - DRAG_EDGE)) / DRAG_EDGE * DRAG_MAX_STEP));
+        }
+        dragStep = step;
+        if (step !== 0 && !dragRaf) dragRaf = requestAnimationFrame(dragScrollTick);
+    }
 
     function endRowDrag(e) {
         if (!dragRow) return;
         if (e && e.pointerId !== undefined && e.pointerId !== dragPtr) return;
+        if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = 0; }
+        dragStep = 0;
         dragRow.classList.remove('is-dragging');
         dragRow = null;
         dragPtr = null;
