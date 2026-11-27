@@ -415,15 +415,16 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         $html .=       ($flagOn ? '<span class="flag-badge" title="数据存疑，待核对">存疑</span>' : '');
         $html .=     '</div>';
         $html .=     '<div class="batch-right">';
+        /* 打印用得最勤，单独留在外面一点就能点；编辑/删除收进「⋯」免得误触 */
+        $html .=       '<button type="button" class="btn-mini print js-print" data-id="' . (int)$b['id'] . '" title="打印这张进货单">'
+                     .   '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 17h12v4H6z"/></svg>'
+                     .   '<span>打印</span></button>';
         $html .=       '<button type="button" class="batch-more js-more" data-id="' . (int)$b['id'] . '" aria-label="更多操作" aria-haspopup="true" aria-expanded="false">'
                      . '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>'
                      . '</button>';
         $html .=       '<div class="batch-menu" role="menu">'
                      .   '<button type="button" class="bm-item js-edit" role="menuitem" data-id="' . (int)$b['id'] . '">'
                      .     '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.2 4.3l4.5 4.5L8.5 20H4v-4.5z"/><path d="M13 6.5l4.5 4.5"/></svg>编辑</button>'
-                     .   '<button type="button" class="bm-item js-print" role="menuitem" data-id="' . (int)$b['id'] . '">'
-                     .     '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 17h12v4H6z"/></svg>打印</button>'
-                     .   '<span class="bm-sep" aria-hidden="true"></span>'
                      .   '<button type="button" class="bm-item danger js-del" role="menuitem" data-id="' . (int)$b['id'] . '">'
                      .     '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>删除</button>'
                      . '</div>';
@@ -1496,6 +1497,10 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
 .btn-mini:hover{border-color:#c3d4ff;color:#3f68e8;background:#f6f9ff;}
 .btn-mini.danger:hover{border-color:#ffc9cf;color:var(--danger);background:#fff5f6;}
 .btn-mini.print:hover{border-color:#b7e6c8;color:#1f8a4c;background:#f4fdf7;}
+/* 卡片头「打印」：图标与文字一起居中，图标平时灰、悬停转绿，和文字同色系 */
+.btn-mini.print{display:inline-flex;align-items:center;gap:6px;}
+.btn-mini.print svg{color:#8a97ab;transition:color .16s;}
+.btn-mini.print:hover svg{color:#1f8a4c;}
 
 /* ---------- 卡片右上角「更多」菜单：打印 / 编辑 / 删除都收进这里，避免误点 ---------- */
 .batch-more{
