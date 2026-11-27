@@ -406,7 +406,7 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
             $totalQty += (float)$it['qty'];
         }
 
-        $html .= '<div class="batch" data-id="' . (int)$b['id'] . '">';
+        $html .= '<div class="batch" data-id="' . (int)$b['id'] . '" data-flag="' . ($flagOn ? '1' : '0') . '">';
         $html .=   '<div class="batch-head">';
         $html .=     '<div class="batch-info">';
         // 依然输出标准的 YYYY-MM-DD 格式
@@ -421,11 +421,11 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         $html .=       '<div class="batch-menu" role="menu">'
                      .   '<button type="button" class="bm-item js-edit" role="menuitem" data-id="' . (int)$b['id'] . '">'
                      .     '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.2 4.3l4.5 4.5L8.5 20H4v-4.5z"/><path d="M13 6.5l4.5 4.5"/></svg>编辑</button>'
-                     .   '<button type="button" class="bm-item danger js-del" role="menuitem" data-id="' . (int)$b['id'] . '">'
-                     .     '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>删除</button>'
-                     .   '<span class="bm-sep" aria-hidden="true"></span>'
                      .   '<button type="button" class="bm-item js-print" role="menuitem" data-id="' . (int)$b['id'] . '">'
                      .     '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 17h12v4H6z"/></svg>打印</button>'
+                     .   '<span class="bm-sep" aria-hidden="true"></span>'
+                     .   '<button type="button" class="bm-item danger js-del" role="menuitem" data-id="' . (int)$b['id'] . '">'
+                     .     '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>删除</button>'
                      . '</div>';
         $html .=     '</div>';
         $html .=   '</div>';
@@ -4037,8 +4037,9 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
     function printBatch(card) {
         if (printBusy) { toast('正在打印，等这个对话框关掉再点'); return; }
 
-        /* 存疑单先问一句：数据还没核对完就印出去，提醒一下 */
-        if (card && card.querySelector('.flag-badge')) {
+        /* 存疑单先问一句：数据还没核对完就印出去，提醒一下。
+           读卡片上的 data-flag，别去认徽章元素——哪天徽章换了画法也不至于悄悄失效 */
+        if (card && card.dataset.flag === '1') {
             if (!confirm('这张单标着「存疑」，还没核对完就打出来吗？')) return;
         }
 
