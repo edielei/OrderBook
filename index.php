@@ -415,9 +415,18 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
         $html .=       ($flagOn ? '<span class="flag-badge" title="数据存疑，待核对">存疑</span>' : '');
         $html .=     '</div>';
         $html .=     '<div class="batch-right">';
-        $html .=       '<button type="button" class="btn-mini js-print" data-id="' . (int)$b['id'] . '">打印</button>';
-        $html .=       '<button type="button" class="btn-mini js-edit" data-id="' . (int)$b['id'] . '">编辑</button>';
-        $html .=       '<button type="button" class="btn-mini danger js-del" data-id="' . (int)$b['id'] . '">删除</button>';
+        $html .=       '<button type="button" class="batch-more js-more" data-id="' . (int)$b['id'] . '" aria-label="更多操作" aria-haspopup="true" aria-expanded="false">'
+                     . '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>'
+                     . '</button>';
+        $html .=       '<div class="batch-menu" role="menu">'
+                     .   '<button type="button" class="bm-item js-print" role="menuitem" data-id="' . (int)$b['id'] . '">'
+                     .     '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 17h12v4H6z"/></svg>打印</button>'
+                     .   '<button type="button" class="bm-item js-edit" role="menuitem" data-id="' . (int)$b['id'] . '">'
+                     .     '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.2 4.3l4.5 4.5L8.5 20H4v-4.5z"/><path d="M13 6.5l4.5 4.5"/></svg>编辑</button>'
+                     .   '<span class="bm-sep" aria-hidden="true"></span>'
+                     .   '<button type="button" class="bm-item danger js-del" role="menuitem" data-id="' . (int)$b['id'] . '">'
+                     .     '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>删除这张单</button>'
+                     . '</div>';
         $html .=     '</div>';
         $html .=   '</div>';
 
@@ -1487,6 +1496,34 @@ input.invalid:focus, select.invalid:focus{background:#fff;border-color:#f08c99;b
 .btn-mini:hover{border-color:#c3d4ff;color:#3f68e8;background:#f6f9ff;}
 .btn-mini.danger:hover{border-color:#ffc9cf;color:var(--danger);background:#fff5f6;}
 .btn-mini.print:hover{border-color:#b7e6c8;color:#1f8a4c;background:#f4fdf7;}
+
+/* ---------- 卡片右上角「更多」菜单：打印 / 编辑 / 删除都收进这里，避免误点 ---------- */
+.batch-more{
+    width:34px;height:34px;flex:none;display:flex;align-items:center;justify-content:center;
+    border:1px solid var(--line);background:#fff;border-radius:9px;color:#8494ab;
+    cursor:pointer;transition:.16s;position:relative;z-index:1;
+}
+.batch-more:hover,.batch-more[aria-expanded="true"]{border-color:#c3d4ff;color:#3f68e8;background:#f6f9ff;}
+/* 停靠：fixed 定位（气泡不会被卡片的 overflow:hidden 裁掉），坐标由 JS 按按钮位置算 */
+.batch-menu{
+    position:fixed;z-index:9200;min-width:146px;padding:6px;display:none;flex-direction:column;gap:1px;
+    background:#fff;border:1px solid #e2eaf6;border-radius:12px;box-shadow:0 14px 34px rgba(30,55,105,.16);
+}
+.batch-menu.open{display:flex;animation:menuIn .13s ease-out;}
+@keyframes menuIn{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:none;}}
+.bm-item{
+    display:flex;align-items:center;gap:9px;width:100%;padding:9px 12px;border:0;border-radius:8px;
+    background:none;font-family:inherit;font-size:13.5px;color:#42546e;text-align:left;cursor:pointer;
+    transition:background-color .14s, color .14s;
+}
+.bm-item svg{flex:none;color:#93a3ba;}
+.bm-item:hover{background:#f4f8ff;color:#3f68e8;}
+.bm-item:hover svg{color:#3f68e8;}
+.bm-item.danger{color:#cf4759;}
+.bm-item.danger svg{color:#e08b96;}
+.bm-item.danger:hover{background:#fff5f6;color:#c2303f;}
+.bm-item.danger:hover svg{color:#c2303f;}
+.bm-sep{height:1px;margin:4px 6px;background:#f1f5fb;}
 .empty{text-align:center;padding:54px 10px;color:var(--muted-light);font-size:14px;}
 
 mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radius: 4px; font-weight: 600; }
@@ -4054,7 +4091,59 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         }
     }
 
+    /* ---------- 卡片「更多」菜单：一次只开一个，点别处/滚动/按 Esc 都自动收起 ---------- */
+    function closeBatchMenu() {
+        document.querySelectorAll('.batch-menu.open').forEach((m) => {
+            m.classList.remove('open');
+            const batch = m.closest('.batch');
+            const btn = batch ? batch.querySelector('.js-more') : null;
+            if (btn) btn.setAttribute('aria-expanded', 'false');
+        });
+    }
+
+    function toggleBatchMenu(btn) {
+        const batch = btn.closest('.batch');
+        const menu  = batch ? batch.querySelector('.batch-menu') : null;
+        if (!menu) return;
+
+        const wasOpen = menu.classList.contains('open');
+        closeBatchMenu();
+        if (wasOpen) return;
+
+        menu.classList.add('open');
+        /* 先上屏量尺寸，再按按钮位置贴靠：右边缘对齐按钮，下面放不下就往上翻 */
+        const r  = btn.getBoundingClientRect();
+        const mh = menu.offsetHeight;
+        const mw = menu.offsetWidth;
+        let top  = r.bottom + 6;
+        if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - 6 - mh);
+        let left = r.right - mw;
+        if (left < 8) left = 8;
+        if (left + mw > window.innerWidth - 8) left = window.innerWidth - 8 - mw;
+        menu.style.top  = top + 'px';
+        menu.style.left = left + 'px';
+        btn.setAttribute('aria-expanded', 'true');
+    }
+
+    /* 点菜单外 / 滚动（含卡片内部滚动）/ 窗口缩放 / 按 Esc 都收起 */
+    on(document, 'pointerdown', (e) => {
+        if (e.target.closest('.batch-menu') || e.target.closest('.js-more')) return;
+        closeBatchMenu();
+    }, true);
+    on(window, 'scroll', closeBatchMenu);              /* 整页滚动 */
+    on(document, 'scroll', closeBatchMenu, true);      /* 卡片内横向滚动等局部滚动 */
+    on(window, 'resize', closeBatchMenu);
+    on(document, 'keydown', (e) => {
+        if (e.key === 'Escape') closeBatchMenu();
+    });
+
     on(listBox, 'click', async (e) => {
+        /* ---- 卡片右上角「更多」：展开菜单 ---- */
+        const moreBtn = e.target.closest('.js-more');
+        if (moreBtn) {
+            toggleBatchMenu(moreBtn);
+            return;
+        }
         /* ---- 翻页 ---- */
         const pageBtn = e.target.closest('.page-btn');
         if (pageBtn) {
@@ -4101,6 +4190,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         /* ---- 打印 ---- */
         const printBtn = e.target.closest('.js-print');
         if (printBtn) {
+            closeBatchMenu();
             printBatch(printBtn.closest('.batch'));
             return;
         }
@@ -4108,6 +4198,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         /* ---- 编辑 ---- */
         const editBtn = e.target.closest('.js-edit');
         if (editBtn) {
+            closeBatchMenu();
             try {
                 const data = await getJSON('?ajax=batch&id=' + encodeURIComponent(editBtn.dataset.id));
                 if (!data.ok) throw new Error(data.msg || '加载失败');
@@ -4147,6 +4238,7 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         /* ---- 删除 ---- */
         const delBtn = e.target.closest('.js-del');
         if (!delBtn) return;
+        closeBatchMenu();
         if (!confirm('确定要删除这张进货单吗？明细会一并删除。')) return;
 
         try {
