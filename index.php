@@ -3365,6 +3365,8 @@ mark.hl { background-color: #fff3bf; color: #d48806; padding: 0 2px; border-radi
         priceBlurTimer = setTimeout(() => {
             const ae = document.activeElement;
             if (ae && priceTip && priceTip.contains(ae)) return;
+            /* 焦点已经换到另一个单价框（或小计）：那边会自己弹浮层，这里别把新的收掉 */
+            if (ae && ae.classList && (ae.classList.contains('i-price') || ae.classList.contains('i-sub'))) return;
             hidePriceTip();
         }, 120);
     });
