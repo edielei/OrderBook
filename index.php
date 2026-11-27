@@ -419,13 +419,13 @@ function renderList(PDO $pdo, string $q, string $date, string $shop = '', int $p
                      . '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>'
                      . '</button>';
         $html .=       '<div class="batch-menu" role="menu">'
-                     .   '<button type="button" class="bm-item js-print" role="menuitem" data-id="' . (int)$b['id'] . '">'
-                     .     '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 17h12v4H6z"/></svg>打印</button>'
                      .   '<button type="button" class="bm-item js-edit" role="menuitem" data-id="' . (int)$b['id'] . '">'
                      .     '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.2 4.3l4.5 4.5L8.5 20H4v-4.5z"/><path d="M13 6.5l4.5 4.5"/></svg>编辑</button>'
-                     .   '<span class="bm-sep" aria-hidden="true"></span>'
                      .   '<button type="button" class="bm-item danger js-del" role="menuitem" data-id="' . (int)$b['id'] . '">'
                      .     '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>删除这张单</button>'
+                     .   '<span class="bm-sep" aria-hidden="true"></span>'
+                     .   '<button type="button" class="bm-item js-print" role="menuitem" data-id="' . (int)$b['id'] . '">'
+                     .     '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 17h12v4H6z"/></svg>打印</button>'
                      . '</div>';
         $html .=     '</div>';
         $html .=   '</div>';
